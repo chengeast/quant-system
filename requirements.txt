@@ -1,0 +1,9 @@
+# M1 数据层依赖
+pandas>=2.0
+numpy>=1.24
+pyarrow>=12.0
+
+# 阶段 4 后续模块会用到（按需补装）
+# scipy>=1.10        # ADF / Engle-Granger / Johansen 协整检验（M2/M3）
+# statsmodels>=0.14  # OLS 估 h（M3）
+# plotly             # 前端看板（M9）
