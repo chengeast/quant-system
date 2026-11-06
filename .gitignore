@@ -1,0 +1,38 @@
+# ==================== 敏感凭据（绝不进 Git）====================
+.env
+.env.*
+*.key
+*.secret
+secrets/
+
+# ==================== 数据缓存（体量大，不进 Git）====================
+data/cache/
+*.parquet
+*.csv
+*.h5
+backtest/output/
+
+# ==================== Python ====================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# ==================== 本地运行 ====================
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# ==================== 本地 Agent 工作区（不进仓库）====================
+.workbuddy-ai/
+
+# ==================== 根目录遗留脚本（不进正式仓库）====================
+/click_webpage.py
+.idea/
+.vscode/
+*.iml

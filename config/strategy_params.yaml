@@ -1,0 +1,84 @@
+# ============================================================================
+# 统计套利 MVP · 策略参数基准（阶段 2 冻结版）
+# ----------------------------------------------------------------------------
+# 来源：phase2-quant-debate.md（3 位金融专家少数服从多数裁决）
+# 本文件是项目"重点回测/检验"的核心参数。改动必须走审计流程（见下方 audit）。
+#
+# 安全说明：
+#   - 策略参数本身非"机密"，但属竞争敏感 + 决策留痕，用 SHA256 校验和防误改。
+#   - 真正敏感的 APIKEY 放在 .env（不进本文件、不进 Git），见 .env.example。
+#   - 实盘开关密钥单独管理，见 live_trading。
+# ============================================================================
+
+version: "1.0"
+frozen_by: "phase2-quant-debate"
+frozen_date: "2026-11-06"
+owner: "quant_experts_A_B_C"
+
+# ---- 币种对筛选（争议点1 多数裁决）----
+pair_screening:
+  correlation_min: 0.85        # corr≥0.85 初筛（B、C 收紧，A 的 0.7 被否）
+  cointegration:
+    primary: "engle_granger"
+    cross_check: "johansen"    # 双校验防伪回归（A 保留）
+    adf_p_max: 0.05
+  liquidity:
+    min_daily_volume_usd: 50000000   # 日成交≥$50M（C 独有，采纳）
+    max_spread_bps: 5                  # 盘口价差≤5bp（C）
+  half_life_bars: [25, 50]             # 半衰期 25–50 bars（B/C 交集，5m 尺度）
+  bars_unit: "5m"
+
+# ---- 信号（争议点2 多数裁决：±3σ / 0.5σ / 2σ止损 / 动态超时）----
+signal:
+  entry_sigma: 3.0             # ±3σ 进场（B、C 胜出，A 的 2.5σ 落选）
+  exit_sigma: 0.5              # 0.5σ 离场（3:0 一致）
+  stop_loss_sigma: 2.0        # 单腿 2σ 硬止损（C 值，B 的 1.5σ 过紧）
+  timeout_hours: 3.0          # max(3h, 1.2H) 超时强平（C 值）
+  timeout_half_life_factor: 1.2  # 超时 = max(3h, 1.2 × H)
+
+# ---- 对冲比率 h（争议点3 多数裁决）----
+hedge_ratio:
+  estimation: "rolling_ols_return"   # 60bar 收益率 OLS（A 值）
+  window_bars: 60
+  range: [0.5, 2.0]                  # h∈[0.5,2.0]（A/C，B 的 1.5 落选但保留告警）
+  daily_change_max: 0.10            # 日变化率<10%（A/C 值）
+  invalidate_on_out_of_range: true   # 越界即整对 INVALID + 告警
+
+# ---- 回测通过门槛（争议点4 多数裁决）----
+backtest_gate:
+  max_drawdown_pct: 10.0        # 回撤≤10%
+  min_sharpe: 2.0               # 夏普≥2.0（扣 0.08% 成本后）
+  min_calmar: 1.5               # Calmar≥1.5
+  max_consecutive_losses: 5     # 最长连续亏损≤5 笔
+  must_survive_extreme_window: "2024-09"  # 含 2024-09 事件段不亏
+
+# ---- 交易成本假设（吸纳 B、C，升级为硬门槛）----
+cost_model:
+  taker_fee_pct: 0.001          # Gate.io taker 0.1%
+  slippage_bps_per_side: [3, 5]  # 滑点≥3–5bp/边
+  max_cost_as_pct_of_gross: 0.35  # 每笔成本≤毛利 35%
+
+# ---- 年化口径 ----
+annualization:
+  sharpe_factor: "sqrt(252*144)"  # 1min 数据年化（数据工程师口径）
+
+# ============================================================================
+# 审计区（append-only，记录每次参数变更。变更需带操作人 + 前后值 + 理由）
+# 校验：改动后重算 SHA256，写入下方 checksum 字段（配合 CI 校验防误改）
+# ============================================================================
+audit:
+  - ts: "2026-11-06"
+    actor: "quant_experts_A_B_C"
+    action: "freeze_v1.0"
+    reason: "阶段2 三专家少数服从多数裁决，冻结为执行基准"
+    checksum: "a5e0202e6f953b2e47adb6b84c32c7248d31688746d8c1f31300f643e43a766e"   # 阶段4 代码化后由脚本填充
+
+# ============================================================================
+# 实盘开关（独立于策略参数，默认关闭。密钥不在此文件、不进 Git）
+# 安全工程师口径：二次确认 + 人工审批 + 与模拟物理隔离
+# ============================================================================
+live_trading:
+  enabled: false               # 硬边界：MVP 默认关闭
+  require_manual_approval: true
+  require_second_confirmation: true
+  key_reference: "LIVE_TRADING_KEY"   # 密钥引用名，实际值走系统 KeyVault，不落盘
