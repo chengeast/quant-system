@@ -75,10 +75,25 @@ audit:
 
 # ============================================================================
 # 实盘开关（独立于策略参数，默认关闭。密钥不在此文件、不进 Git）
-# 安全工程师口径：二次确认 + 人工审批 + 与模拟物理隔离
+# 方案（用户 2026-11-07 认可）：系统级密钥 + 独立于数据密钥 + 二次确认
+#   - key_vault: 实盘密钥走系统 KeyVault（Windows: DPAPI/Credential Manager），
+#                与 Gate.io 数据密钥（.env 只读）物理隔离，绝不写进本文件/仓库
+#   - 独立性: LIVE_TRADING_KEY 独立于 GATE_API_KEY，权限最小化（仅下单，无提现）
+#   - 二次确认: enable_live_trading 需操作人输入确认短语 + 二次校验后方可翻转
+#   - 审计: 每次 enable/disable 写 audit，保留 ≥90 天
 # ============================================================================
+  - ts: "manual"
+    actor: "manual"
+    action: "checksum_refresh"
+    reason: "参数变更流程留痕"
+    checksum: "d5a8372cf63c54b5be2ec5912be185017432fce3c2a22fc545474ad0f64c3ecc"
 live_trading:
   enabled: false               # 硬边界：MVP 默认关闭
   require_manual_approval: true
   require_second_confirmation: true
-  key_reference: "LIVE_TRADING_KEY"   # 密钥引用名，实际值走系统 KeyVault，不落盘
+  second_confirmation_phrase: "CONFIRM LIVE TRADING"   # 翻转时须逐字输入
+  key_vault: "SYSTEM_KEYVAULT"   # 系统级密钥管理，非文件存储
+  key_reference: "LIVE_TRADING_KEY"
+  key_independent_of_data_key: true   # 实盘密钥独立于数据密钥
+  key_permissions: "order_only_no_withdraw"  # 最小权限：仅下单，禁用提现
+  audit_retention_days: 90
