@@ -28,6 +28,16 @@ pair_screening:
   half_life_bars: [25, 50]             # 半衰期 25–50 bars（B/C 交集，5m 尺度）
   bars_unit: "5m"
 
+# ---- 选定币对（M2 仲裁结果，1h 30天数据下筛出；深数据可重筛）----
+selected_pair:
+  leg_a: "BTC_USDT"
+  leg_b: "SOL_USDT"
+  selected_from: "m2_screening_1h_30d"
+  corr: 0.938
+  eg_p: 0.0007
+  half_life_bars_1h: 32.7
+  note: "1h 30天数据筛出，MVP 跑通用；APIKEY 解锁深历史后建议重筛"
+
 # ---- 信号（争议点2 多数裁决：±3σ / 0.5σ / 2σ止损 / 动态超时）----
 signal:
   entry_sigma: 3.0             # ±3σ 进场（B、C 胜出，A 的 2.5σ 落选）
@@ -87,6 +97,11 @@ audit:
     action: "checksum_refresh"
     reason: "参数变更流程留痕"
     checksum: "d5a8372cf63c54b5be2ec5912be185017432fce3c2a22fc545474ad0f64c3ecc"
+  - ts: "manual"
+    actor: "manual"
+    action: "checksum_refresh"
+    reason: "参数变更流程留痕"
+    checksum: "1381deab48982afb04beba4d1e01976f15b815aaf916011fe6dac6200f668dad"
 live_trading:
   enabled: false               # 硬边界：MVP 默认关闭
   require_manual_approval: true
