@@ -76,6 +76,23 @@ cost_model:
   slippage_bps_per_side: [3, 5]  # 滑点≥3–5bp/边
   max_cost_as_pct_of_gross: 0.35  # 每笔成本≤毛利 35%
 
+# ---- 因子拥挤 / alpha 衰减监控（用户 2026-11-07 提出 + phase4 §9.2 修正）----
+# 原则：衰减是渐进过程且被 AI 持续压缩，不可设固定重估周期，须"突变检测 + 滚动窗口"
+# MVP 阶段仅落地接口与指标定义，数值待 M8 回测数据校准
+monitoring:
+  alpha_decay_monitor:
+    slope_window: 60            # 滚动窗口 bar 数（加密 1h）；突变检测触发重估
+    decay_ratio: 0.8           # 信号强度 vs 实现收益比，跌破 0.8 触发重估
+    slippage_ratio_window: 30  # 价差回归速度观测窗口
+    sigma_compression: 0.7     # 价差 σ 压缩阈值（σ 现值 / 历史 σ 中位数 < 0.7 触发）
+    reestimate_trigger: "anomaly"  # 非固定周期，突变检测驱动
+  crowding_metrics:            # 4 项拥挤度指标候选，M7 监控层实现
+    - "signal_to_realized_ratio"
+    - "price_diff_regression_speed"
+    - "turnover_expansion"
+    - "sigma_compression"
+  backtest_steady_state_factor: 0.5   # 稳态收益 = 峰值收益 × 0.5（保守起步，M8 校准）
+
 # ---- 年化口径 ----
 annualization:
   sharpe_factor: "sqrt(252*144)"  # 1min 数据年化（数据工程师口径）
@@ -120,6 +137,11 @@ audit:
     action: "checksum_refresh"
     reason: "参数变更流程留痕"
     checksum: "f6f6e0fbd492a030e31fe91d2b247a4acac3f3fd03104173d0b8807f002c9563"
+  - ts: "manual"
+    actor: "manual"
+    action: "checksum_refresh"
+    reason: "参数变更流程留痕"
+    checksum: "17eb442890fbc790f7fd2b52e59413a457d14d34a8461555086e9e815f6e53d4"
 live_trading:
   enabled: false               # 硬边界：MVP 默认关闭
   require_manual_approval: true
