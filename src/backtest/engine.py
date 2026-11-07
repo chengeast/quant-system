@@ -216,6 +216,10 @@ class Backtester:
         if benchmark is None:
             benchmark = self._load_benchmark()
 
+        # M9-a 参数门禁：回测前强制校验参数一致性（被改未留痕即阻断）
+        from src.backtest.param_gate import ensure_params_for_backtest
+        self.param_check = ensure_params_for_backtest()
+
         n = len(sig)
         base_equity = self.cfg.base_equity
         equity_curve = np.full(n, np.nan)

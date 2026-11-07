@@ -4,8 +4,12 @@ from src.backtest.engine import (
     BacktestConfig, Backtester, BacktestResult, LegAccount,
     compute_performance, check_gates,
 )
+from src.backtest.param_gate import (
+    ParamCheckResult, check_params, ensure_params_for_backtest,
+)
 
 __all__ = [
     "BacktestConfig", "Backtester", "BacktestResult", "LegAccount",
     "compute_performance", "check_gates",
+    "ParamCheckResult", "check_params", "ensure_params_for_backtest",
 ]

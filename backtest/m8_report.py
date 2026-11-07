@@ -54,6 +54,48 @@ def data_fingerprint() -> Dict[str, str]:
 
 
 # ============================================================================
+# 逐 bar 序列导出（M9-b 前端看板渲染用）
+# ============================================================================
+
+def _export_series(res, sig: pd.DataFrame) -> Dict[str, list]:
+    """导出 M9-b 看板需要的逐 bar 序列（净值/价差/z/持仓/告警时间戳）。
+
+    - ts: unix 秒（与 equity_curve.index 一致）
+    - equity / spread / zscore: 逐 bar 值
+    - position: 逐 bar 持仓态（FLAT/LONG_SPREAD/SHORT_SPREAD，由平仓交易区间推导）
+    - alert_ts: M7 监控事件时间戳（本 MVP 回测默认无外部告警流，占位空列表）
+    非关键路径：序列缺失的字段容错为 []，不阻断看板渲染。
+    """
+    ts = [int(t) for t in sig["ts"].tolist()]
+    eq = res.equity_curve.dropna()
+    eq_map = dict(zip([int(t) for t in eq.index], eq.tolist()))
+    equity = [round(float(eq_map.get(t, float("nan"))), 2) for t in ts]
+    spread = [round(float(v), 6) for v in sig["spread"].tolist()]
+    z = [None if pd.isna(v) else round(float(v), 4) for v in sig["zscore"].tolist()]
+
+    # 持仓：逐 bar 由开/平仓交易推导（买开→多头价差，卖开→空头价差；平仓翻回 FLAT）
+    # trade 记录含 ts_ms（平仓 bar）+ side；开仓 bar 早于平仓 bar（t+1 成交）。
+    position = ["FLAT"] * len(ts)
+    trades = getattr(res, "trades", []) or []
+    n = len(ts)
+    for t in trades:
+        close_t = int(t.get("ts_ms", 0)) // 1000
+        side = str(t.get("side", ""))
+        label = "LONG_SPREAD" if side in ("buy", "long_spread", "close") else "SHORT_SPREAD"
+        # 平仓发生在 close_t；开仓在 close_t-1（t+1 成交）；持仓区间 [open, close)
+        open_t = close_t - 1
+        for i in range(n):
+            if open_t <= ts[i] < close_t:
+                position[i] = label
+    # 告警时间戳（M7 非关键路径，回测默认空；占位保证前端锚点齐全）
+    alert_ts: list = []
+    return {
+        "ts": ts, "equity": equity, "spread": spread,
+        "z": z, "position": position, "alert_ts": alert_ts,
+    }
+
+
+# ============================================================================
 # 主入口
 # ============================================================================
 
@@ -125,6 +167,13 @@ def main() -> int:
     snap_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False,
                                     default=str))
     print(f"\n[golden value] → {snap_path}")
+
+    # ---- 逐 bar 序列（M9-b 前端看板渲染用：净值/价差/z/持仓）----
+    series = _export_series(res, res.signal_df)
+    series_path = out_dir / "series.json"
+    series_path.write_text(json.dumps(series, indent=2, ensure_ascii=False,
+                                      default=str))
+    print(f"[逐 bar 序列] → {series_path} ({len(series['ts'])} bar)")
 
     # ---- markdown 报告 ----
     md = _render_report(res, m, g, snapshot)
