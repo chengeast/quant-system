@@ -6,15 +6,12 @@ M1 · 数据层 —— Gate.io 现货 K 线接入、清洗、两腿对齐、Parq
   - agents/phase3-project-plan.md M1（验收标准）
 
 职责边界：只负责"拿到可信行情 + 清洗 + 对齐 + 落地"，不含任何策略逻辑。
-公开接口 build_kline_fetcher() 返回带 cache_dir / fetch / align 的方法对象，
-下游（信号层 M3）只依赖它，不依赖实现。
 
-实测分页语义（2026-11-07）：
-  - GET /spot/candlesticks 字段顺序（单根数组）：
-    [t, v, close, high, low, open, amount, is_closed]
-    其中 v = 成交额（USDT 计价），amount = 成交量（基础币计价）
-  - from/to 可同时传（不混 limit 即可），按时间区间返回
-  - limit 上限 < 3000；翻页用 from/to 滑动窗口
+历史深度（实测，2026-11-07，用只读 KEY 解锁后）：
+  - Gate.io K 线只保留最近 10000 根（硬上限）
+  - 1h 粒度 → 最近 ~416 天可用；5m → ~34.7 天；1m → ~7 天
+  - 单次请求 ≤1000 根，深历史需 from/to 分页 + 频率退避
+  - 有 GATE_API_KEY 时走 GateClient（签名只读）拉深历史；无则回退公开接口（~30 天）
 """
 
 from __future__ import annotations
@@ -28,13 +25,14 @@ import pandas as pd
 import numpy as np
 
 GATE_BASE = "https://api.gateio.ws/api/v4"
-UA = {"User-Agent": "Mozilla/5.0 (quant-system M1)"}
+UA = {"User-Agent": "Mozilla/5.0 (quant-system)"}
 
-# 各粒度默认拉取深度（天）
+# 各粒度默认拉取深度（天）—— 受 10000 根上限约束，超出自动截断
+MAX_CANDLES = 10000
 DEFAULT_LOOKBACK_DAYS = {
-    "1h": 730,   # 主尺度（协整/半衰期）
-    "5m": 90,    # 默认回测
-    "1m": 30,    # 滑点/微观结构
+    "1h": min(410, MAX_CANDLES // 24),   # ≈ 410 天
+    "5m": 33,
+    "1m": 7,
 }
 INTERVAL_SECONDS = {"1m": 60, "5m": 300, "1h": 3600}
 
@@ -43,8 +41,18 @@ PRICE_JUMP_PCT = 0.05      # |close_t/close_{t-1} - 1| > 5% 且量偏低 → 坏
 THIN_VOL_QUANTILE = 0.2    # 成交量 < 中位数的 20% 视为低流动性
 
 
+def _get_auth_client():
+    """有 KEY 时返回签名只读客户端，无则 None（回退公开接口）。"""
+    try:
+        from .gate_client import GateClient
+        c = GateClient()
+        return c
+    except Exception:
+        return None
+
+
 def _http_get_json(url: str, timeout: int = 20, retries: int = 3, delay: float = 200 / 1000):
-    """带重试的 GET，规避 Gate.io 限流（~200 req/30s）。"""
+    """带重试的 GET（公开接口，无签名）。"""
     last_exc = None
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, headers=UA)
@@ -74,7 +82,10 @@ class GateKLineFetcher:
         """拉取单一 currency_pair 的 K 线，返回清洗后的 DataFrame。
 
         列：ts(int,UTC秒), open, high, low, close, volume(基础币), quote_volume(USDT),
-            thin(bool), bad_px(bool)
+            thin(bool), bad_px(bool), gap(bool)
+
+        有 GATE_API_KEY 时走 GateClient（签名只读）拉深历史（~410 天）；
+        无 key 时回退公开接口（~30 天）。
         """
         if interval not in INTERVAL_SECONDS:
             raise ValueError(f"不支持的 interval: {interval}")
@@ -89,20 +100,24 @@ class GateKLineFetcher:
         return df
 
     def _fetch_all(self, pair: str, interval: str, start: int, end: int) -> list:
-        """用 from/to 滑动窗口翻页拉取全区间（规避 limit 上限）。
+        """深历史拉取：优先用只读签名客户端（GateClient，分页+退避），
+        无 KEY 时回退公开接口的 from/to 滑动窗口。"""
+        auth = _get_auth_client()
+        if auth is not None:
+            try:
+                return auth.fetch_candles(pair, interval, start, end,
+                                           window_days=self._window_days(interval))
+            except Exception as e:  # 签名/网络失败则回退公开接口
+                import warnings
+                warnings.warn(f"签名深历史拉取失败，回退公开接口: {e}", stacklevel=2)
 
-        Gate.io 实测：深历史接口对过老的 from 会返回 400。
-        因此单窗口 400 时不再让整个拉取崩溃，而是把该窗口跳过并告警，
-        自动收缩到"可用深度"，保证能拿到的尽量拿到。
-        """
-        span = end - start
-        window = min(7 * 86400, max(span, 1))   # 每次窗口 7 天（1h 约 168 根）
-        step = window // 2                        # 50% 重叠防边界漏
+        # 公开接口回退：from/to 滑动窗口，对 400 自动收缩
+        step = self._window_days(interval) * 86400 // 2
         cur = start
         out: list = []
         skipped = 0
         while cur < end:
-            w_end = min(cur + window, end)
+            w_end = min(cur + self._window_days(interval) * 86400, end)
             url = (f"{GATE_BASE}/spot/candlesticks?currency_pair={pair}"
                    f"&interval={interval}&from={cur}&to={w_end}")
             batch = self._safe_get(url)
@@ -118,10 +133,15 @@ class GateKLineFetcher:
             cur = cur + step
         if skipped:
             import warnings
-            warnings.warn(
-                f"{pair} {interval}: {skipped} 个窗口 400（超出公开接口可用深度），"
-                f"实际拉取深度有限，详见返回数据最早时间戳。", stacklevel=2)
+            warnings.warn(f"{pair} {interval}: {skipped} 窗口超出公开接口深度", stacklevel=2)
         return out
+
+    @staticmethod
+    def _window_days(interval: str) -> int:
+        """分页窗口大小（天），使每窗口 K 线数 < 1000。"""
+        is_ = INTERVAL_SECONDS.get(interval, 3600)
+        days = max(1, 900 // (86400 // is_))  # 约 900 根/窗口
+        return min(days, 7)
 
     def _safe_get(self, url: str):
         """单窗口拉取：成功返回 list，400 返回 None（用于自动收缩），其它异常重试后抛出。"""
