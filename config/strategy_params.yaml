@@ -26,11 +26,14 @@ pair_screening:
     min_daily_volume_usd: 50000000   # 日成交≥$50M（C 独有，采纳）
     max_spread_bps: 5                  # 盘口价差≤5bp（C）
   # 半衰期区间：数据驱动（用户 2026-11-07 原则：以计算结果为准，不凭经验）
-  # 410天1h深数据实测：主流币对(剔除DOGE离群)半衰期 IQR=[508,593] bar
-  half_life_bars: [508, 593]
+  # 410天1h深数据实算 10 币对半衰期分布：
+  #   270(BTC/ETH) 310(ETH/SOL) 360(BTC/SOL) 392(XRP/DOGE)
+  #   530(ETH/XRP) 583(BTC/XRP) 629(SOL/XRP) 932/1152/1416(含DOGE腿,离群)
+  # 全量 IQR=[368,856]；DOGE 腿为离群（流动性弱/协整差），标记但不硬删区间边界
+  half_life_bars: [368, 856]
   bars_unit: "1h"
   data_driven: true            # 区间由 M2 实算分布得出，非经验值
-  exclude_outliers: ["DOGE_USDT"]  # DOGE 腿半衰期1151+bar/协整弱，剔除
+  outlier_legs: ["DOGE_USDT"]  # DOGE 腿半衰期932-1416bar 为离群，标注；币对优选排除
 
 # ---- 选定币对（M2 深数据 410 天重筛结果，数据驱动）----
 selected_pair:
@@ -42,12 +45,6 @@ selected_pair:
   half_life_bars_1h: 407.0
   note: "410天深数据重筛：EG_p 0.0186为最优协整，corr 0.982，半衰期407bar(17天)。"
         "旧BTC/SOL(EG_p 0.0648)在深数据下不达标，已由数据纠正。"
-  leg_b: "SOL_USDT"
-  selected_from: "m2_screening_1h_30d"
-  corr: 0.938
-  eg_p: 0.0007
-  half_life_bars_1h: 32.7
-  note: "1h 30天数据筛出，MVP 跑通用；APIKEY 解锁深历史后建议重筛"
 
 # ---- 信号（争议点2 多数裁决：±3σ / 0.5σ / 2σ止损 / 动态超时）----
 signal:
@@ -118,6 +115,11 @@ audit:
     action: "checksum_refresh"
     reason: "参数变更流程留痕"
     checksum: "759f7c939a1e6b8a0eb6a407492835fbd9be34f1f7c9f4b75d26db5adcae85ef"
+  - ts: "manual"
+    actor: "manual"
+    action: "checksum_refresh"
+    reason: "参数变更流程留痕"
+    checksum: "f6f6e0fbd492a030e31fe91d2b247a4acac3f3fd03104173d0b8807f002c9563"
 live_trading:
   enabled: false               # 硬边界：MVP 默认关闭
   require_manual_approval: true
