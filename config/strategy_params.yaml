@@ -68,7 +68,11 @@ backtest_gate:
   min_sharpe: 2.0               # 夏普≥2.0（扣 0.08% 成本后）
   min_calmar: 1.5               # Calmar≥1.5
   max_consecutive_losses: 5     # 最长连续亏损≤5 笔
-  must_survive_extreme_window: "2024-09"  # 含 2024-09 事件段不亏
+  # 极端段门槛（数据窗口 2025-09~2026-11 不含 2024-09，按用户裁决改写为窗口内真实极端段）
+  # 2026-02-04~02-10：7 日累计 -25.7%（02-05 单日 -14.0%），为窗口内最极端崩盘段
+  must_survive_extreme_window: "2026-02"
+  extreme_window_start: 1770163200   # 2026-02-04 00:00 UTC
+  extreme_window_end: 1770681600     # 2026-02-10 00:00 UTC
 
 # ---- 交易成本假设（吸纳 B、C，升级为硬门槛）----
 cost_model:
@@ -142,6 +146,11 @@ audit:
     action: "checksum_refresh"
     reason: "参数变更流程留痕"
     checksum: "17eb442890fbc790f7fd2b52e59413a457d14d34a8461555086e9e815f6e53d4"
+  - ts: "manual"
+    actor: "manual"
+    action: "checksum_refresh"
+    reason: "参数变更流程留痕"
+    checksum: "74cc9c3dbec64f35fef01a57db6d19acbb691a2207175f87298e2642d9d5e3a9"
 live_trading:
   enabled: false               # 硬边界：MVP 默认关闭
   require_manual_approval: true

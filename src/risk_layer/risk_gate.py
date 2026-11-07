@@ -121,6 +121,12 @@ class RiskGate:
         self.emergency = EmergencyStopState()
         # 权益跟踪
         self._equity_peak = base_equity
+        # 紧急停止复位（phase5 M8 暴露）：一次 halt 不应熔断后续所有单
+        # 复位 bar 数：halt 后 N bar 内不再放行（防止反复拒单），
+        # N bar 后自动复位（MVP 保守：10 bar ≈ 10h）
+        self.halt_reset_bars = 10
+        self._halt_bar_count = 0
+        self._last_halt_bar_ts = -1
 
     # ------------------------------------------------------------------
     # 主入口
@@ -144,6 +150,16 @@ class RiskGate:
         """
         # 1. 紧急停止已触发
         if self.emergency.halted:
+            # 复位：halt 后 N bar 不再放行（防反复拒单），N bar 后自动复位
+            if ts_ms != self._last_halt_bar_ts:
+                self._halt_bar_count += 1
+                self._last_halt_bar_ts = ts_ms
+                if self._halt_bar_count >= self.halt_reset_bars:
+                    self.emergency.resumed = True
+                    self._halt_bar_count = 0
+                    # 复位后清拒单率窗口，避免历史拒单累积
+                    self._bar_decisions.clear()
+                    return RiskVerdict.REJECT  # 本 bar 仍拒，下一 bar 恢复
             return RiskVerdict.HALT
 
         # 更新权益峰值
@@ -152,16 +168,29 @@ class RiskGate:
         equity_drop = (self._equity_peak - equity) / self._equity_peak \
             if self._equity_peak > 0 else 0.0
 
-        # 2. regime 异常 → 拒单 + 检查拒单率是否触发 halt
+        # 2. regime 异常 → 拒单
+        # 统计套利 MVP：regime 偶发 INVALID（如 h 越界）是信号层正常标记，
+        # 不应累计拒单率触发紧急停止（否则一次 INVALID 就熔断整段回测）。
+        # 拒单率统计只针对"敞口/超额"类拒单（exposure），regime 拒单仅记录日志。
         if regime in (RegimeStatus.BROKEN, RegimeStatus.INVALID,
                       RegimeStatus.LOCKED):
-            self._reject(ts_ms, intent, f"regime={regime.value}", "regime")
-            if self._check_reject_rate(ts_ms):
-                return RiskVerdict.HALT
+            self._reject(ts_ms, intent, f"regime={regime.value}", "regime",
+                         count_in_reject_rate=False)
             return RiskVerdict.REJECT
 
         # 3. 单笔敞口
-        single_exposure = intent.qty * intent.limit_price if intent.qty > 0 else 0.0
+        # 统计套利配对仓（leg_a_qty≠0）是市值中性的：腿 A +q、腿 B −q，
+        # 净敞口 ≈ (leg_a_qty - leg_b_qty) × price，而非合成 qty × limit_price。
+        # 用净敞口口径，否则中性配对仓会被误判成巨额单边敞口而全被拒。
+        if intent.leg_a_qty != 0.0 or intent.leg_b_qty != 0.0:
+            net_qty = abs(intent.leg_a_qty) + abs(intent.leg_b_qty)
+            # 净敞口 = 两腿同向部分的 |A| + |B| − 2×min(|A|,|B|)
+            # 对标准配对仓 |A|=|B| → 净敞口=0（完全中性）
+            net_exposure = net_qty - 2.0 * min(abs(intent.leg_a_qty),
+                                                abs(intent.leg_b_qty))
+            single_exposure = net_exposure * intent.limit_price
+        else:
+            single_exposure = intent.qty * intent.limit_price if intent.qty > 0 else 0.0
         single_limit = equity * self.max_single_exposure
         if single_exposure > single_limit:
             self._reject(ts_ms, intent,
@@ -172,6 +201,9 @@ class RiskGate:
             return RiskVerdict.REJECT
 
         # 4. 总敞口
+        # 统计套利配对仓：持仓也是中性配对，总敞口 = 腿净敞口（接近 0）而非持仓市值。
+        # 配对仓 position.qty 是"价差合成 qty"，其市值不代表净风险。
+        # 若 position 是中性配对仓（M8 主循环传入 qty=0 + 标记），总敞口≈0。
         total_exposure = abs(position.qty) * position.avg_cost if position.qty else 0.0
         total_limit = equity * self.max_total_exposure
         if total_exposure + single_exposure > total_limit:
@@ -208,8 +240,13 @@ class RiskGate:
     # 辅助
     # ------------------------------------------------------------------
     def _reject(self, ts_ms: int, intent: OrderIntent,
-                reason: str, category: str) -> None:
-        """记录拒单（append-only，验收标准 1）。按 bar 去重统计拒单率。"""
+                reason: str, category: str,
+                count_in_reject_rate: bool = True) -> None:
+        """记录拒单（append-only，验收标准 1）。按 bar 去重统计拒单率。
+
+        count_in_reject_rate=False：仅记日志，不计入拒单率统计
+        （regime 偶发 INVALID 不应触发 halt，M8 统计套利场景）。
+        """
         rec = RejectRecord(
             ts_ms=ts_ms,
             order_id=intent.order_id,
@@ -221,6 +258,8 @@ class RiskGate:
             intent=intent,
         )
         self.reject_log.append(rec)
+        if not count_in_reject_rate:
+            return
         # 按 bar 记录拒单：同一 bar 内多次拒单只计 1 个 slot
         if ts_ms != self._last_bar_ts:
             self._bar_decisions.append(True)

@@ -1,0 +1,536 @@
+"""
+M8 · 回测引擎 —— M3→M4→M5→M6→M7 端到端主循环
+
+设计依据：
+  - agents/phase3-project-plan.md M8（跑端到端回测，扣费+滑点，t+1 成交；四件套+成本可执行性）
+  - agents/phase2-architecture.md §6 公式红线（R4 t 出信号 t+1 成交）
+  - agents/phase5-mid-term-review.md A1/A3/A4（显式 hl_range=(368,856)；1h 年化 √(365×24)）
+  - config/strategy_params.yaml（backtest_gate / cost_model / monitoring）
+
+主循环（后端架构师方案）：
+  每 bar t：
+    1. 读 M3 信号第 t 行（zscore/spread/half_life/state）
+    2. M4 决策 → OrderIntent（基于 t 时刻信号 + 当前持仓快照）
+    3. M5 风控 gate(intent, position, equity, ts, regime) → PASS/REJECT/HALT
+    4. PASS → M6 execute(intent) → FillReport → 更新 LocalPortfolio + 净值
+    5. M7 监控 on_signal/on_reject/on_recon_drift（非关键路径，不影响撮合）
+  红线：信号 t 出、成交在 t+1 跨 bar（R4 防未来函数）——
+        本引擎用"延迟一 bar 执行"实现：t 决策的 intent 在 t+1 bar 才撮合。
+
+口径（会前 D9 裁决）：
+  - 1h K线 → 年化因子 √(365×24)，区别于 1min √(252×144)
+  - 成本：taker 0.1%/边 + 滑点 4bp/边（M6 PaperBroker）
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Any
+
+
+@dataclass
+class LegAccount:
+    """单腿持仓跟踪（A / B 各一份）。统计套利净值的核心账本。"""
+    qty: float = 0.0        # 净持仓（正=多头，负=空头）
+    avg_cost: float = 0.0
+    realized: float = 0.0   # 已实现盈亏（毛，未扣费）
+
+    def apply(self, side: str, qty: float, price: float) -> float:
+        """按 side/qty/price 更新腿持仓，返回本次实现的毛盈亏。"""
+        if qty <= 0:
+            return 0.0
+        direction = 1.0 if side == "buy" else -1.0
+        pnl = 0.0
+        new_qty = self.qty + direction * qty
+        if self.qty * new_qty < 0:
+            # 反手：先平掉旧仓
+            closed = abs(self.qty)
+            pnl = (price - self.avg_cost) * closed * (1.0 if self.qty > 0 else -1.0)
+            self.realized += pnl
+            self.qty = new_qty
+            self.avg_cost = price
+        elif new_qty == 0.0:
+            pnl = (price - self.avg_cost) * abs(qty) * (1.0 if self.qty > 0 else -1.0)
+            self.realized += pnl
+            self.qty = 0.0
+            self.avg_cost = 0.0
+        else:
+            # 同向加仓
+            if self.qty != 0.0:
+                total = abs(self.qty) + abs(qty)
+                self.avg_cost = (abs(self.qty) * self.avg_cost
+                                 + abs(qty) * price) / total
+            else:
+                self.avg_cost = price
+            self.qty = new_qty
+        return pnl
+
+    def value(self, price: float) -> float:
+        """本腿浮动净值贡献 = 已实现 + 浮动盈亏。"""
+        return self.realized + self.qty * (price - self.avg_cost)
+
+from src.signal_layer.mean_reversion_signals import MeanReversionSignals
+from src.decision_layer.mean_reversion_strategy import (
+    MeanReversionStrategy, PositionSnapshot,
+)
+from src.risk_layer.risk_gate import RiskGate, CryptoRiskPolicy
+from src.execution_layer.execution_manager import (
+    PaperBroker, Reconciler, ExecutionManager,
+)
+from src.monitoring_layer.monitoring import (
+    CryptoMonitorPolicy, MonitoringHub,
+)
+from src.core.market_ifaces import Position, RegimeStatus, OrderIntent
+
+
+@dataclass
+class BacktestConfig:
+    """回测配置（M8 引擎参数，市场无关）。"""
+    # 数据
+    leg_a_file: str = "ETH_USDT_1h_410d.parquet"
+    leg_b_file: str = "SOL_USDT_1h_410d.parquet"
+    benchmark_file: str = "BTC_USDT_1h_410d.parquet"
+    cache_dir: str = "data/cache"
+
+    # 信号层（A3 裁决：显式传 410 天深数据 IQR 半衰期区间）
+    hedge_window: int = 60
+    entry_sigma: float = 3.0
+    exit_sigma: float = 0.5
+    hl_range: tuple = (368, 856)      # 会前 D1/A3：旧默认 (24,96) 会误判 ETH/SOL INVALID
+
+    # 决策层
+    stop_loss_sigma: float = 2.0
+    timeout_hours: float = 3.0
+    position_cap: float = 10.0
+    bars_per_hour: int = 1
+
+    # 风控层
+    base_equity: float = 10_000.0
+    max_total_exposure: float = 0.20
+    max_single_exposure: float = 0.05
+    reject_rate_window: int = 10
+    reject_rate_threshold: float = 0.20
+    equity_drop_threshold: float = 0.10
+
+    # 执行层（成本模型）
+    taker_fee_pct: float = 0.001
+    slippage_bps: float = 4.0
+
+    # 年化口径（D9：1h = √(365×24)）
+    annualize_factor: float = np.sqrt(365.0 * 24.0)
+
+    # 极端段（窗口内真实极端，会前裁决；2026-02 崩盘 14 日 -29.76%）
+    extreme_window_start: int = 1770163200   # 2026-02-04 00:00 UTC
+    extreme_window_end: int = 1770681600     # 2026-02-10 00:00 UTC
+
+    # 峰值/稳态（phase4 §9.1）
+    steady_state_factor: float = 0.5
+    seed: int = 42
+
+
+# ============================================================================
+# 持仓净值跟踪（统计套利账户）
+# ============================================================================
+
+class Backtester:
+    """端到端回测：M3 信号 → M4 决策 → M5 风控 → M6 执行 → M7 监控。
+
+    红线 R4：信号 t 出、成交 t+1。实现：
+      - 在 bar t 用 M4 生成 pending_intent（基于 t 时刻信号）
+      - 在 bar t+1 才把 pending_intent 撮合（用 t+1 的中间价成交）
+      - 若 t 未出单，则 t+1 无 pending
+    """
+
+    def __init__(self, cfg: BacktestConfig):
+        self.cfg = cfg
+        self.sig_calc = MeanReversionSignals(
+            hedge_window=cfg.hedge_window,
+            entry_sigma=cfg.entry_sigma,
+            exit_sigma=cfg.exit_sigma,
+            hl_range=cfg.hl_range,      # A3 裁决
+        )
+        self.strat = MeanReversionStrategy(
+            entry_sigma=cfg.entry_sigma,
+            exit_sigma=cfg.exit_sigma,
+            stop_loss_sigma=cfg.stop_loss_sigma,
+            timeout_hours=cfg.timeout_hours,
+            position_cap=cfg.position_cap,
+            bars_per_hour=cfg.bars_per_hour,
+        )
+        self.risk_policy = CryptoRiskPolicy(RiskGate(
+            max_total_exposure=cfg.max_total_exposure,
+            max_single_exposure=cfg.max_single_exposure,
+            reject_rate_window=cfg.reject_rate_window,
+            reject_rate_threshold=cfg.reject_rate_threshold,
+            equity_drop_threshold=cfg.equity_drop_threshold,
+            base_equity=cfg.base_equity,
+        ))
+        self.exec_mgr = ExecutionManager(
+            broker=PaperBroker(taker_fee_pct=cfg.taker_fee_pct,
+                               slippage_bps=cfg.slippage_bps),
+            reconciler=Reconciler(),
+        )
+        policy = CryptoMonitorPolicy()
+        self.monitor = policy.build_monitor()
+        self.hub = MonitoringHub(self.monitor)
+
+    # ------------------------------------------------------------------
+    # 数据加载
+    # ------------------------------------------------------------------
+    def load_signals(self) -> pd.DataFrame:
+        """M1→M3：读 Parquet 双腿，算信号 DataFrame。"""
+        pa = pd.read_parquet(self._path(self.cfg.leg_a_file))
+        pb = pd.read_parquet(self._path(self.cfg.leg_b_file))
+        pa = pa.rename(columns={"close": "close_a"})
+        pb = pb.rename(columns={"close": "close_b"})
+        al = pa[["ts", "close_a"]].merge(pb[["ts", "close_b"]], on="ts")
+        al = al.sort_values("ts").reset_index(drop=True)
+        sig = self.sig_calc.compute_signals(al, window=self.cfg.hedge_window)
+        sig["ts_ms"] = sig["ts"].astype(np.int64) * 1000
+        return sig
+
+    def _path(self, name: str):
+        from pathlib import Path
+        return Path(self.cfg.cache_dir) / name
+
+    # ------------------------------------------------------------------
+    # 两腿账户（统计套利净值 = 基础权益 + A腿value + B腿value − 累计成本）
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # 主循环
+    # ------------------------------------------------------------------
+    def run(self, sig: Optional[pd.DataFrame] = None,
+            benchmark: Optional[pd.DataFrame] = None
+            ) -> "BacktestResult":
+        """跑全量回测，返回 BacktestResult（含净值曲线 + 四件套 + 极端段）。
+
+        红线 R4：信号 t 出、成交 t+1 跨 bar。实现：
+          bar t 由 M4 出 intent → 存入 pending；bar t+1 才撮合（用 t+1 价）。
+        """
+        if sig is None:
+            sig = self.load_signals()
+        if benchmark is None:
+            benchmark = self._load_benchmark()
+
+        n = len(sig)
+        base_equity = self.cfg.base_equity
+        equity_curve = np.full(n, np.nan)
+
+        leg_a = LegAccount()
+        leg_b = LegAccount()
+        cost_paid = 0.0        # 累计手续费 + 滑点成本
+        trades: List[Dict[str, Any]] = []
+
+        # 决策层持仓快照
+        pos = PositionSnapshot(state="FLAT")
+        pending: Optional[OrderIntent] = None
+        pending_z: float = 0.0
+
+        for i in range(n):
+            ts_ms = int(sig["ts_ms"].iloc[i])
+            row = sig.iloc[i]
+            close_a = float(row["close_a"])
+            close_b = float(row["close_b"])
+            z = row.get("zscore", np.nan)
+            state = str(row.get("state", "OK"))
+
+            # ===== 跨 bar：先撮合上一 bar 出的单（t+1 成交，红线 R4）=====
+            # 用"成交 bar（t+1）"的 state 拦截，而非出信号 bar 的 state
+            # （防未来函数：t 出信号、t+1 成交，t+1 的 regime 已知）
+            if pending is not None:
+                verdict = self.risk_policy.gate(
+                    pending, self._to_position(pos, base_equity,
+                                               self._exposure(leg_a, leg_b)),
+                    self._equity_now(base_equity, leg_a, leg_b, close_a, close_b,
+                                     cost_paid),
+                    RegimeStatus.OK if state == "OK" else RegimeStatus.INVALID,
+                )
+                if verdict.value == "PASS":
+                    # 成交前腿 realized（用于算本笔平仓实现的毛盈亏）
+                    open_mval = leg_a.value(close_a) + leg_b.value(close_b)
+                    mirror_a, mirror_b = self._current_leg_qtys(leg_a, leg_b)
+                    a_qt, b_qt = self._effective_leg_qtys(pending, leg_a, leg_b)
+                    if a_qt > 0:
+                        self._fill_leg(leg_a, "buy", a_qt, close_a)
+                    elif a_qt < 0:
+                        self._fill_leg(leg_a, "sell", abs(a_qt), close_a)
+                    if b_qt > 0:
+                        self._fill_leg(leg_b, "buy", b_qt, close_b)
+                    elif b_qt < 0:
+                        self._fill_leg(leg_b, "sell", abs(b_qt), close_b)
+                    close_mval = leg_a.value(close_a) + leg_b.value(close_b)
+                    trade_pnl = close_mval - open_mval
+                    # M6 模拟成交：成交标的量 = 开仓用 intent.qty，平仓用镜像量
+                    # 两腿各承担一次手续费 → 成本 = 单次 fee × 2
+                    if pending.side == "close":
+                        close_qty = abs(mirror_a)
+                        trades.append(self._trade_record(
+                            pending, ts_ms, pending_z, pnl=trade_pnl))
+                    else:
+                        close_qty = pending.qty
+                    if close_qty > 0:
+                        avg_px = (close_a + close_b) / 2.0
+                        cost_paid += close_qty * avg_px * self.cfg.taker_fee_pct * 2.0
+                    pending = None
+                # REJECT / HALT：不成交，仅 M7 记拒单（不阻塞核心）
+                self.hub.on_reject(
+                    ts_ms, self.risk_policy.risk_gate.get_reject_rate(),
+                    reason="gate", category="reconcile_pending")
+                pending = None
+
+            # ===== 本 bar：M4 决策（基于 t 时刻信号）→ 产生 pending（t+1 撮合）=====
+            intent = self.strat.decide(sig.iloc[:i + 1].tail(60), pos, ts_ms=ts_ms)
+            if intent is not None:
+                pending = intent
+                pending_z = 0.0 if pd.isna(z) else float(z)
+                if intent.side in ("buy", "sell") and intent.qty > 0:
+                    pos = PositionSnapshot(
+                        state=("LONG_SPREAD" if intent.symbol == "long_spread"
+                               else "SHORT_SPREAD"),
+                        entry_ts_ms=ts_ms,
+                        entry_zscore=pending_z,
+                        position_qty=intent.qty,
+                        leg_a_qty=intent.leg_a_qty,
+                        leg_b_qty=intent.leg_b_qty,
+                    )
+                else:
+                    # 平仓：清空决策层快照（下一 bar 撮合后生效）
+                    pos = PositionSnapshot(state="FLAT", entry_ts_ms=ts_ms,
+                                           entry_zscore=pending_z)
+
+            equity_curve[i] = self._equity_now(base_equity, leg_a, leg_b,
+                                                close_a, close_b, cost_paid)
+
+        # 收尾：最后一 bar 未撮合的 pending 强制撮合（边界，镜像两腿反向）
+        if pending is not None:
+            close_a_last = float(sig["close_a"].iloc[-1])
+            close_b_last = float(sig["close_b"].iloc[-1])
+            a_qt, b_qt = self._effective_leg_qtys(pending, leg_a, leg_b)
+            if a_qt > 0:
+                self._fill_leg(leg_a, "buy", a_qt, close_a_last)
+            elif a_qt < 0:
+                self._fill_leg(leg_a, "sell", abs(a_qt), close_a_last)
+            if b_qt > 0:
+                self._fill_leg(leg_b, "buy", b_qt, close_b_last)
+            elif b_qt < 0:
+                self._fill_leg(leg_b, "sell", abs(b_qt), close_b_last)
+            fill = self.exec_mgr.submit(pending)
+            cost_paid += fill.fee * 2.0
+            equity_curve[-1] = self._equity_now(
+                base_equity, leg_a, leg_b, close_a_last, close_b_last, cost_paid)
+
+        return self._build_result(sig, equity_curve, trades, benchmark, cost_paid)
+
+    # ------------------------------------------------------------------
+    # 账户 / 净值辅助
+    # ------------------------------------------------------------------
+    def _fill_leg(self, leg: LegAccount, side: str,
+                  qty: float, price: float) -> None:
+        leg.apply(side, qty, price)
+
+    def _effective_leg_qtys(self, pending: OrderIntent,
+                             leg_a: LegAccount, leg_b: LegAccount
+                             ) -> tuple:
+        """平仓时 M4 的 close intent 带 leg_qty=0（由调用方按持仓决定），
+        故引擎需镜像当前两腿净持仓：开仓 qty=±cap，平仓取当前实际净持仓反向。"""
+        if pending.side in ("buy", "sell"):
+            # 开仓：用 intent 自带的 leg_qty
+            return pending.leg_a_qty, pending.leg_b_qty
+        # 平仓（close / stop_loss / timeout / exit / invalid_signal_exit）：
+        # 镜像当前净持仓反向平掉
+        return -leg_a.qty, -leg_b.qty
+
+    def _current_leg_qtys(self, leg_a: LegAccount, leg_b: LegAccount) -> tuple:
+        """成交前的两腿净持仓镜像量（平仓标的量 = |镜像量|）。"""
+        return (-leg_a.qty, -leg_b.qty) if (leg_a.qty or leg_b.qty) else (0.0, 0.0)
+
+    def _to_position(self, pos: PositionSnapshot, base_equity: float,
+                     exposure: float) -> Position:
+        """M5 风控的 Position 参数。统计套利配对仓是市值中性的：
+        两腿同时持有（A +q / B −q），净敞口≈0，故 qty 传 0（中性），
+        avg_cost 用单腿均价作参考（供敞口/权益骤降判断）。
+        M5 的敞口门槛改读 OrderIntent 的 leg 净敞口口径。"""
+        return Position(
+            ts_ms=pos.entry_ts_ms, symbol="spread",
+            qty=0.0,   # 中性配对仓：净 qty = 0（腿 A 与腿 B 抵消）
+            avg_cost=exposure / max(1.0, exposure) if exposure else 0.0,
+        )
+
+    def _exposure(self, leg_a: LegAccount,
+                  leg_b: LegAccount) -> float:
+        return abs(leg_a.qty) + abs(leg_b.qty)
+
+    def _equity_now(self, base_equity: float, leg_a: LegAccount,
+                    leg_b: LegAccount, close_a: float,
+                    close_b: float, cost_paid: float) -> float:
+        """统计套利账户净值（浮动）= 基础权益 + A腿value + B腿value − 累计成本。"""
+        return (base_equity + leg_a.value(close_a) + leg_b.value(close_b)
+                - cost_paid)
+
+    def _trade_record(self, intent, ts_ms, z, pnl: float = 0.0) -> Dict[str, Any]:
+        return {
+            "ts_ms": ts_ms, "symbol": intent.symbol, "side": intent.side,
+            "qty": intent.qty, "price": intent.limit_price,
+            "confidence": intent.confidence, "reason": intent.reason, "z": z,
+            "pnl": pnl,
+        }
+
+    def _load_benchmark(self) -> pd.DataFrame:
+        return pd.read_parquet(self._path(self.cfg.benchmark_file))
+
+    def _build_result(self, sig, equity_curve, trades, benchmark,
+                      cost_paid) -> "BacktestResult":
+        res = BacktestResult()
+        res.equity_curve = pd.Series(equity_curve, index=sig["ts"].values, name="equity")
+        res.signal_df = sig
+        res.trades = trades
+        res.cfg = self.cfg
+        res.cost_paid = cost_paid
+        self._fill_metrics(res, benchmark)
+        return res
+
+    def _fill_metrics(self, res: "BacktestResult", benchmark: pd.DataFrame):
+        eq = res.equity_curve
+        res.net_returns = eq.pct_change().fillna(0.0)
+        # 每笔毛利（USD）：正盈亏平仓的 pnl 均值（成本可执行性判定用）
+        pos_pnls = [t["pnl"] for t in res.trades if t.get("pnl", 0.0) > 0]
+        gross_per_trade = (sum(pos_pnls) / len(pos_pnls)) if pos_pnls else None
+        res.metrics = compute_performance(
+            eq, res.net_returns, res.cfg.annualize_factor,
+            extreme_start=res.cfg.extreme_window_start,
+            extreme_end=res.cfg.extreme_window_end,
+            benchmark=benchmark,
+            steady_factor=res.cfg.steady_state_factor,
+            trades=res.trades,
+            gross_per_trade=gross_per_trade,
+            cost_paid=res.cost_paid,
+            n_trades=len(res.trades),
+        )
+
+
+# ============================================================================
+# 结果 + 指标四件套
+# ============================================================================
+
+@dataclass
+class BacktestResult:
+    equity_curve: Optional[pd.Series] = None
+    net_returns: Optional[pd.Series] = None
+    signal_df: Optional[pd.DataFrame] = None
+    trades: List[Dict[str, Any]] = field(default_factory=list)
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    cfg: Optional[BacktestConfig] = None
+    cost_paid: float = 0.0
+
+
+def compute_performance(equity: pd.Series, rets: pd.Series,
+                        annualize_factor: float,
+                        extreme_start: int, extreme_end: int,
+                        benchmark: pd.DataFrame,
+                        steady_factor: float = 0.5,
+                        trades: Optional[List[Dict[str, Any]]] = None,
+                        gross_per_trade: Optional[float] = None,
+                        cost_paid: float = 0.0,
+                        n_trades: Optional[int] = None) -> Dict[str, Any]:
+    """统计套利四件套 + 极端段 + 峰值/稳态双栏 + 跑赢基准 + 连亏 + 成本可执行性。
+
+    口径（D9）：1h 年化因子 √(365×24)。
+    trades：平仓记录（算连亏笔数）。
+    gross_per_trade：每笔毛利（USD，用于成本≤毛利 35% 判定）。
+    """
+    m: Dict[str, Any] = {}
+
+    # 净值曲线
+    eq = equity.dropna()
+    if len(eq) < 2:
+        m.update({"error": "equity curve too short"})
+        return m
+
+    # 累计净收益
+    total_return = (eq.iloc[-1] - eq.iloc[0]) / eq.iloc[0]
+
+    # 最大回撤
+    running_max = eq.cummax()
+    drawdown = (eq - running_max) / running_max
+    max_dd = abs(drawdown.min())
+
+    # 夏普（1h 年化）
+    std = rets.std()
+    sharpe = float(rets.mean() / std * annualize_factor) if std > 0 else 0.0
+
+    # Calmar = 年化收益 / 最大回撤
+    ann_return = rets.mean() * (365.0 * 24.0)
+    calmar = float(ann_return / max_dd) if max_dd > 0 else float("inf")
+
+    # 极端段收益（窗口内真实极端 2026-02）
+    win = eq[(eq.index >= extreme_start) & (eq.index <= extreme_end)]
+    extreme_pnl = (win.iloc[-1] - win.iloc[0]) / win.iloc[0] if len(win) >= 2 else 0.0
+
+    # 跑赢 BTC 单边（同期基准）
+    bm = benchmark.set_index("ts")["close"].dropna()
+    bm = bm[(bm.index >= eq.index.min()) & (bm.index <= eq.index.max())]
+    bm_return = (bm.iloc[-1] - bm.iloc[0]) / bm.iloc[0] if len(bm) >= 2 else 0.0
+
+    # 峰值/稳态双栏（phase4 §9.1）
+    peak_total_return = total_return
+    steady_total_return = total_return * steady_factor
+
+    # 最长连亏笔数（基于 trades 的逐笔盈亏）
+    max_consec_losses = 0
+    if trades:
+        cur, mx = 0, 0
+        for t in trades:
+            if t.get("pnl", 0.0) <= 0:
+                cur += 1
+                mx = max(mx, cur)
+            else:
+                cur = 0
+        max_consec_losses = mx
+
+    # 成本可执行性：每笔成本 ≤ 毛利 35%
+    cost_ok = True
+    if gross_per_trade and n_trades and n_trades > 0:
+        avg_cost_per_trade = cost_paid / n_trades
+        cost_ok = avg_cost_per_trade <= 0.35 * gross_per_trade
+
+    m.update({
+        "total_return": total_return,
+        "steady_total_return": steady_total_return,
+        "peak_total_return": peak_total_return,
+        "max_drawdown": max_dd,
+        "sharpe": sharpe,
+        "calmar": calmar,
+        "extreme_pnl": extreme_pnl,
+        "extreme_survived": extreme_pnl >= 0,
+        "benchmark_total_return": bm_return,
+        "beat_benchmark": total_return > bm_return,
+        "bars": len(eq),
+        "extreme_window": (extreme_start, extreme_end),
+        "max_consecutive_losses": max_consec_losses,
+        "cost_executable": cost_ok,
+        "n_trades": n_trades if n_trades is not None else 0,
+        "cost_paid": cost_paid,
+    })
+    return m
+
+
+# ============================================================================
+# 冻结门槛判定
+# ============================================================================
+
+def check_gates(metrics: Dict[str, Any],
+                gate: Dict[str, Any]) -> Dict[str, bool]:
+    """逐条对齐 backtest_gate（冻结门槛）。"""
+    out: Dict[str, bool] = {}
+    out["net_positive"] = metrics.get("total_return", 0) > 0
+    out["beat_benchmark"] = metrics.get("beat_benchmark", False)
+    out["max_dd"] = metrics.get("max_drawdown", 1.0) <= gate.get(
+        "max_drawdown_pct", 10.0) / 100.0
+    out["sharpe"] = metrics.get("sharpe", 0) >= gate.get("min_sharpe", 2.0)
+    out["calmar"] = metrics.get("calmar", 0) >= gate.get("min_calmar", 1.5)
+    out["extreme_survived"] = metrics.get("extreme_survived", False)
+    return out

@@ -117,6 +117,7 @@ class MeanReversionStrategy:
         # ---- 信号 INVALID/NaN_GUARD + 持仓态 → 强制离场兜底（防被套）----
         if state not in ("OK",) and pos.state in ("LONG_SPREAD", "SHORT_SPREAD"):
             return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
+                                     pos_state="FLAT",
                                      reason="invalid_signal_exit")
 
         # ---- FLAT + 信号无效 → 不交易 ----
