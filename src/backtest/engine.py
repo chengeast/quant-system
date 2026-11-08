@@ -259,7 +259,9 @@ class Backtester:
                     self._to_position(pos, close_a, close_b),
                     self._equity_now(base_equity, leg_a, leg_b, close_a, close_b,
                                      cost_paid),
-                    RegimeStatus.OK if state == "OK" else RegimeStatus.INVALID,
+                    # phase5 P1：DEGRADED = h 短窗口重估成功钳制界内，可放行；
+                    # 仅 INVALID（重估失败/NaN_GUARD）才拒单
+                    RegimeStatus.OK if state in ("OK", "DEGRADED") else RegimeStatus.INVALID,
                 )
                 if verdict.value == "PASS":
                     # 成交前腿 realized（用于算本笔平仓实现的毛盈亏）

@@ -115,13 +115,16 @@ class MeanReversionStrategy:
         # 此处仅记录，实际拦截由状态机 _would_add_position + 仓位 cap 联合保证
 
         # ---- 信号 INVALID/NaN_GUARD + 持仓态 → 强制离场兜底（防被套）----
-        if state not in ("OK",) and pos.state in ("LONG_SPREAD", "SHORT_SPREAD"):
+        # phase5-m8-defect-debate P1：DEGRADED（h 短窗口重估成功钳制界内）
+        # 属于合法可运行状态（h 已在 [0.5,2] 内），**不**触发强制离场；
+        # 仅 INVALID/NaN_GUARD/BROKEN 才强制离场。
+        if state not in ("OK", "DEGRADED") and pos.state in ("LONG_SPREAD", "SHORT_SPREAD"):
             return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                      pos_state="FLAT",
                                      reason="invalid_signal_exit")
 
-        # ---- FLAT + 信号无效 → 不交易 ----
-        if state not in ("OK",) and pos.state == "FLAT":
+        # ---- FLAT + 信号无效 → 不交易（DEGRADED 允许交易）----
+        if state not in ("OK", "DEGRADED") and pos.state == "FLAT":
             return None
 
         return self._state_machine(pos, z, ts_ms, half_life, spread_a, spread_b)

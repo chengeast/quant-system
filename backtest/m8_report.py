@@ -144,9 +144,10 @@ def main() -> int:
     print("\n[M8 暴露的工程缺陷]（中期会 A1-A8 行动清单触发项）")
     print("  D8（未来函数）：M8 主循环已按 t 出信号 / t+1 成交落实 ✅")
     print("  D9（年化口径）：M8 报告已注明 1h √(365×24) ✅")
-    print("  M3 h 越界：410 天 524 bar（5.3%）hedge_ratio∉[0.5,2.0] → INVALID")
-    print("     → 持仓态下 M4 invalid_signal_exit 反复强平损耗")
-    print("     （h 越界即 INVALID 是 phase2 冻结红线，未擅改；记 M9 优化项）")
+    print("  M3 h 越界（P1 已修）：主窗口 OLS 越界 → 短窗口重估 + 钳制到 [0.5,2]，打 DEGRADED 标记")
+    print("     （旧：越界即 INVALID → 持仓态 M4 invalid_signal_exit 反复强平损耗；")
+    print("     新：DEGRADED 允许策略运行，仅重估失败 → INVALID 为最后出口；")
+    print("     越界占比进币对健康度监控 h_out_rate / h_degraded_rate）")
     print("  M5 regime 拒单：regime INVALID 不计入拒单率统计（已修，避免熔断整段）")
     n_trades = m.get("n_trades", 0)
     if n_trades > 0:

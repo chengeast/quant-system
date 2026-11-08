@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -42,16 +42,24 @@ class Signal:
 
 
 class MeanReversionSignals:
-    """价差 / 对冲比率 / z-score / 协整指标计算（纯函数，无状态机）。"""
+    """价差 / 对冲比率 / z-score / 协整指标计算（纯函数，无状态机）。
+
+    设计依据（phase5-m8-defect-debate P1）：
+      - 主窗口（60bar）OLS h 越界 → 短窗口（30bar）重估 + 钳制到 [0.5, 2.0]
+      - 重估成功 → 标记 "DEGRADED"（告警但保留策略运行）
+      - 重估失败（窗口方差为 0）→ 标记 "INVALID"（最后出口，M4 invalid_signal_exit）
+      - 越界占比进币对健康度监控（get_h_health → M7 AlphaDecayMonitor）
+    """
 
     def __init__(self,
                  hedge_window: int = 60,
-                 hedge_range: tuple[float, float] = (0.5, 2.0),
+                 hedge_range: tuple = (0.5, 2.0),
                  hedge_daily_change_max: float = 0.10,
-                 hl_range: tuple[float, float] = (24, 96),
+                 hl_range: tuple = (24, 96),
                  entry_sigma: float = 3.0,
                  exit_sigma: float = 0.5,
-                 adf_p_max: float = 0.05):
+                 adf_p_max: float = 0.05,
+                 reestimate_window: int = 30):
         self.hedge_window = hedge_window
         self.hedge_range = hedge_range
         self.hedge_daily_change_max = hedge_daily_change_max
@@ -59,6 +67,11 @@ class MeanReversionSignals:
         self.entry_sigma = entry_sigma
         self.exit_sigma = exit_sigma
         self.adf_p_max = adf_p_max
+        # phase5-m8-defect-debate P1：h 越界重估窗口（短于主窗口，快速响应结构变化）
+        self.reestimate_window = reestimate_window
+        self._h_degraded_count = 0
+        self._h_out_range_count = 0
+        self._n_bars = 0
 
     # ---------- 对冲比率 h（红线 R2：滚动窗口收益率 OLS）----------
     @staticmethod
@@ -93,6 +106,30 @@ class MeanReversionSignals:
             h_t = float(np.cov(ya, xb, bias=True)[0, 1] / var_b)
             h[t] = h_t
         return pd.Series(h, index=log_a.index)
+
+    # ---------- h 越界重估 + 钳制（phase5-m8-defect-debate P1）----------
+    def _reestimate_h(self, log_a: pd.Series, log_b: pd.Series,
+                      t: int) -> Optional[float]:
+        """短窗口（reestimate_window=30bar）重估 h_t，用于主窗口 OLS 越界时的快速响应。
+
+        原理：主窗口（60bar）反映长期趋势，币对结构突变（regime shift）时长期 h 失真；
+        短窗口（30bar）捕捉局部均衡，重估后钳制到 [0.5, 2.0] 避免极端值。
+        返回钳制后的 h_t；窗口方差为 0 或 t 不足 reestimate_window 返回 None。
+        """
+        if t < self.reestimate_window:
+            return None
+        a = np.log(log_a.iloc[t - self.reestimate_window:t].to_numpy())
+        b = np.log(log_b.iloc[t - self.reestimate_window:t].to_numpy())
+        da = np.diff(a, prepend=a[0])
+        db = np.diff(b, prepend=b[0])
+        var_b = float(np.var(db))
+        if var_b < 1e-12:
+            return None
+        h_re = float(np.cov(da, db, bias=True)[0, 1] / var_b)
+        if not np.isfinite(h_re):
+            return None
+        # 钳制到 [0.5, 2.0] 边界（phase2 冻结红线区间）
+        return max(self.hedge_range[0], min(self.hedge_range[1], h_re))
 
     # ---------- 价差（红线 R1：A - h*B）----------
     @staticmethod
@@ -163,21 +200,54 @@ class MeanReversionSignals:
     def compute_signals(self, df: pd.DataFrame, window: int = 60) -> pd.DataFrame:
         """输入 M2 对齐后的双腿 DataFrame（含 close_a/close_b），输出信号 DataFrame。
 
-        列：ts, spread, hedge_ratio, zscore, half_life, adf_p,
-            entry_flag, exit_flag, state
+        列：ts, close_a, close_b, spread, hedge_ratio, zscore, half_life,
+            adf_p, h_degraded, h_out_range, h_out_rate, h_degraded_rate,
+            state, entry_flag, exit_flag
         红线 R4：本层只产"信号指标"，进出 flag 是 t 时刻算的，
             实际成交在 t+1（由 M4 决策层 + M8 回测保证跨 bar）。
+
+        phase5-m8-defect-debate P1 落地：
+          - 主窗口 OLS h 越界 → 短窗口重估 + 钳制到 [0.5, 2.0] 边界
+          - 重估成功 → 标记 "DEGRADED"（告警但保留策略运行）
+          - 重估失败（窗口方差为 0）→ 标记 "INVALID"（最后出口）
+          - 越界占比进币对健康度监控（h_out_rate / h_degraded_rate）
         """
         if "close_a" not in df.columns or "close_b" not in df.columns:
             raise ValueError("输入需含 close_a / close_b 双腿收盘价")
         log_a = df["close_a"].astype(float)
         log_b = df["close_b"].astype(float)
 
-        # 1) 对冲比率 h（红线 R2：滚动收益率 OLS）
-        h = self._rolling_h(log_a, log_b, window)
+        # 1) 主窗口 OLS h（60bar，长期趋势）
+        h = self._rolling_h(log_a, log_b, window).to_numpy().copy()
+        n = len(h)
+        h_degraded = np.zeros(n, dtype=bool)   # 重估成功钳制标记
+        h_out_range = np.zeros(n, dtype=bool)   # 主窗口越界总标记（含降级）
+        self._h_degraded_count = 0
+        self._h_out_range_count = 0
+
+        for t in range(n):
+            if np.isnan(h[t]):
+                continue
+            in_range = self.hedge_range[0] <= h[t] <= self.hedge_range[1]
+            if in_range:
+                continue
+            # 主窗口越界 → 短窗口重估 + 钳制
+            h_re = self._reestimate_h(log_a, log_b, t)
+            if h_re is not None:
+                h[t] = h_re           # 用重估+钳制后的值（已界内）
+                h_degraded[t] = True  # 打降级标记
+                self._h_degraded_count += 1
+                h_out_range[t] = True  # 总越界计数（含降级）
+                self._h_out_range_count += 1
+            else:
+                # 重估失败（窗口方差为 0）→ 保持越界，INVALID 最后出口
+                h_out_range[t] = True
+                self._h_out_range_count += 1
+
+        h_series = pd.Series(h, index=log_a.index)
 
         # 2) 价差（红线 R1：A - h·B）
-        spread = self._spread(log_a, h, log_b)
+        spread = self._spread(log_a, h_series, log_b)
 
         # 3) z-score（红线 R3：原始价差序列 μ/σ）
         z = self._zscore(spread, window)
@@ -193,19 +263,34 @@ class MeanReversionSignals:
             "close_a": log_a.values,
             "close_b": log_b.values,
             "spread": spread.values,
-            "hedge_ratio": h.values,
+            "hedge_ratio": h_series.values,
             "zscore": z.values,
             "half_life": hl.values,
             "adf_p": adf_p.values,
+            "h_degraded": h_degraded,     # 短窗口重估成功钳制标记
+            "h_out_range": h_out_range,   # 主窗口越界总标记（含降级）
         })
 
-        # h 越界 → INVALID（风控红线）
-        out["h_out_range"] = ~out["hedge_ratio"].between(*self.hedge_range, inclusive="both")
-        out["state"] = np.where(out["h_out_range"], "INVALID", "OK")
+        # 状态机：
+        #   h 重估成功 → "DEGRADED"（告警但保留策略运行）
+        #   h 重估失败 → "INVALID"（最后出口，持仓态下 M4 invalid_signal_exit）
+        #   zscore/hedge_ratio NaN → "NaN_GUARD"
+        out["state"] = np.where(
+            out["h_degraded"], "DEGRADED",
+            np.where(out["h_out_range"] & ~out["h_degraded"], "INVALID", "OK"),
+        )
         out.loc[out["zscore"].isna() | out["hedge_ratio"].isna(), "state"] = "NaN_GUARD"
 
+        # 越界占比（币对健康度监控指标，M7 AlphaDecayMonitor 消费）
+        self._n_bars = n
+        valid_mask = out["hedge_ratio"].notna()
+        n_valid = int(valid_mask.sum())
+        out.loc[:, "h_out_rate"] = float(out["h_out_range"][valid_mask].mean()) if n_valid > 0 else 0.0
+        out.loc[:, "h_degraded_rate"] = float(out["h_degraded"][valid_mask].mean()) if n_valid > 0 else 0.0
+
         # 进出 flag（t 时刻信号；红线 R4：t+1 成交由下游保证）
-        z_valid = out["zscore"].notna() & (out["state"] == "OK")
+        # DEGRADED 状态允许进出（h 已钳制界内），INVALID 不允许
+        z_valid = out["zscore"].notna() & out["state"].isin(("OK", "DEGRADED"))
         out["entry_flag"] = (
             ((out["zscore"] <= -self.entry_sigma) | (out["zscore"] >= self.entry_sigma))
             & z_valid
@@ -215,3 +300,13 @@ class MeanReversionSignals:
         )
 
         return out
+
+    def get_h_health(self) -> dict:
+        """h 健康度监控指标（M7 消费：越界占比 / 降级占比 / 总 bar 数）。"""
+        return {
+            "n_bars": self._n_bars,
+            "h_out_range_count": self._h_out_range_count,
+            "h_degraded_count": self._h_degraded_count,
+            "h_out_rate": self._h_out_range_count / max(1, self._n_bars),
+            "h_degraded_rate": self._h_degraded_count / max(1, self._n_bars),
+        }
