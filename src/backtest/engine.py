@@ -4,8 +4,9 @@ M8 · 回测引擎 —— M3→M4→M5→M6→M7 端到端主循环
 设计依据：
   - agents/phase3-project-plan.md M8（跑端到端回测，扣费+滑点，t+1 成交；四件套+成本可执行性）
   - agents/phase2-architecture.md §6 公式红线（R4 t 出信号 t+1 成交）
-  - agents/phase5-mid-term-review.md A1/A3/A4（显式 hl_range=(368,856)；1h 年化 √(365×24)）
-  - config/strategy_params.yaml（backtest_gate / cost_model / monitoring）
+  - agents/phase5-mid-term-review.md A1/A3/A4（显式 hl_range=(368,856)）
+  - config/strategy_params.yaml（backtest_gate / cost_model / monitoring / timeframe）
+  - src/core/timeframe.py（周期参数单一事实源；用户 2026-11-08「周期不能写死」）
 
 主循环（后端架构师方案）：
   每 bar t：
@@ -17,8 +18,11 @@ M8 · 回测引擎 —— M3→M4→M5→M6→M7 端到端主循环
   红线：信号 t 出、成交在 t+1 跨 bar（R4 防未来函数）——
         本引擎用"延迟一 bar 执行"实现：t 决策的 intent 在 t+1 bar 才撮合。
 
-口径（会前 D9 裁决）：
-  - 1h K线 → 年化因子 √(365×24)，区别于 1min √(252×144)
+口径（会前 D9 裁决 + 2026-11-08 周期参数化）：
+  - 年化因子不再写死 1h：由 BacktestConfig.interval + 市场交易日历派生
+    （annualize_factor = √(bars_per_year)），见 src/core/timeframe.py。
+    加密 7×24 下 1h=√8760、15m=√35040、4h=√2190、1d=√365；
+    换 A 股只需改 hours_per_day=4 / trading_days_per_year=252。
   - 成本：taker 0.1%/边 + 滑点 4bp/边（M6 PaperBroker）
 """
 
@@ -84,11 +88,32 @@ from src.monitoring_layer.monitoring import (
     CryptoMonitorPolicy, MonitoringHub,
 )
 from src.core.market_ifaces import Position, RegimeStatus, OrderIntent
+from src.core.timeframe import (
+    DEFAULT_HOURS_PER_DAY, DEFAULT_TRADING_DAYS_PER_YEAR, DEFAULT_INTERVAL,
+    Timeframe, interval_from_filename, resolve_timeframe,
+)
 
 
 @dataclass
 class BacktestConfig:
-    """回测配置（M8 引擎参数，市场无关）。"""
+    """回测配置（M8 引擎参数，市场无关）。
+
+    周期参数化（用户 2026-11-08 裁决「1h 周期不能写死，这是一个周期参数」）：
+      interval 是唯一声明点；bars_per_hour / annualize_factor / bar_ms 全部由
+      src/core/timeframe.resolve_timeframe() 派生。显式传入的旧式尺度常数若与
+      派生值不符直接 ValueError，避免换周期时漏改一处导致夏普/Calmar/超时全错。
+    """
+    # ---- 周期（尺度参数唯一声明点）----
+    interval: str = DEFAULT_INTERVAL
+    hours_per_day: float = DEFAULT_HOURS_PER_DAY              # 加密 7×24；A 股填 4
+    trading_days_per_year: float = DEFAULT_TRADING_DAYS_PER_YEAR  # 加密 365；A 股填 252
+    # 落盘数据文件名声明的周期；None = 与 interval 相同。
+    # 第三轮 B 层扫描读 1h parquet 后聚合成 4h/1d，此时须显式 data_interval="1h"。
+    data_interval: Optional[str] = None
+    # 兼容旧调用的显式覆盖位；必须与派生值一致，否则报错（防呆）
+    bars_per_hour: Optional[float] = None
+    annualize_factor: Optional[float] = None
+
     # 数据
     leg_a_file: str = "ETH_USDT_1h_410d.parquet"
     leg_b_file: str = "SOL_USDT_1h_410d.parquet"
@@ -112,7 +137,6 @@ class BacktestConfig:
     # qty = base_equity × leg_equity_pct × confidence / 单腿价
     # 旧 position_cap=10.0（币数）拍死市值，随价格漂移导致 M5 全拒/净值异常。
     leg_equity_pct: float = 0.05
-    bars_per_hour: int = 1
 
     # 风控层
     base_equity: float = 10_000.0
@@ -126,9 +150,6 @@ class BacktestConfig:
     taker_fee_pct: float = 0.001
     slippage_bps: float = 4.0
 
-    # 年化口径（D9：1h = √(365×24)）
-    annualize_factor: float = np.sqrt(365.0 * 24.0)
-
     # 极端段（窗口内真实极端，会前裁决；2026-02 崩盘 14 日 -29.76%）
     extreme_window_start: int = 1770163200   # 2026-02-04 00:00 UTC
     extreme_window_end: int = 1770681600     # 2026-02-10 00:00 UTC
@@ -136,6 +157,37 @@ class BacktestConfig:
     # 峰值/稳态（phase4 §9.1）
     steady_state_factor: float = 0.5
     seed: int = 42
+
+    # 派生结果（不参与构造，由 __post_init__ 填充）
+    timeframe: Timeframe = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        tf = resolve_timeframe(self.interval, self.hours_per_day,
+                               self.trading_days_per_year)
+        self.timeframe = tf
+        # 派生 + 防呆：任何手写残留的 1h 尺度常数与声明周期不符时立刻拦下
+        for name, given, derived in (
+            ("bars_per_hour", self.bars_per_hour, tf.bars_per_hour),
+            ("annualize_factor", self.annualize_factor, tf.annualize_factor),
+        ):
+            if given is None:
+                setattr(self, name, derived)
+            elif abs(float(given) - derived) > 1e-6:
+                raise ValueError(
+                    f"{name}={given} 与 interval={self.interval} 的派生值 "
+                    f"{derived:.6f} 不一致。周期是参数：请只改 interval，"
+                    "不要手写尺度常数（src/core/timeframe.py 是单一事实源）。"
+                )
+        # 数据文件声明的周期必须与回测周期一致，防止拿 1h 数据按 15m 口径跑
+        data_iv = self.data_interval or self.interval
+        for fname in (self.leg_a_file, self.leg_b_file, self.benchmark_file):
+            file_iv = interval_from_filename(fname)
+            if file_iv is not None and file_iv != data_iv:
+                raise ValueError(
+                    f"周期不一致：{fname} 文件名声明 {file_iv}，但 "
+                    f"data_interval={data_iv}（回测 interval={self.interval}）。"
+                    "请同步周期，或显式指定 data_interval（聚合数据场景）。"
+                )
 
 
 # ============================================================================
@@ -168,7 +220,9 @@ class Backtester:
             timeout_hours=cfg.timeout_hours,
             timeout_half_life_factor=cfg.timeout_half_life_factor,
             position_cap=cfg.leg_equity_pct,   # 0.05 = 单腿 5% 权益（M8 换算用）
-            bars_per_hour=cfg.bars_per_hour,
+            interval=cfg.interval,
+            bars_per_hour=cfg.bars_per_hour,    # 已由 timeframe 派生
+            bar_ms=cfg.timeframe.bar_ms,
         )
         self.risk_policy = CryptoRiskPolicy(RiskGate(
             max_total_exposure=cfg.max_total_exposure,
@@ -183,7 +237,7 @@ class Backtester:
                                slippage_bps=cfg.slippage_bps),
             reconciler=Reconciler(),
         )
-        policy = CryptoMonitorPolicy()
+        policy = CryptoMonitorPolicy(interval=cfg.interval)
         self.monitor = policy.build_monitor()
         self.hub = MonitoringHub(self.monitor)
 
@@ -547,7 +601,8 @@ def compute_performance(equity: pd.Series, rets: pd.Series,
                         n_trades: Optional[int] = None) -> Dict[str, Any]:
     """统计套利四件套 + 极端段 + 峰值/稳态双栏 + 跑赢基准 + 连亏 + 成本可执行性。
 
-    口径（D9）：1h 年化因子 √(365×24)。
+    口径（D9 + 周期参数化）：annualize_factor 由 src/core/timeframe.py
+    按 interval + 市场交易日历派生（= √bars_per_year），本函数不假设任何周期。
     trades：平仓记录（算连亏笔数）。
     gross_per_trade：每笔毛利（USD，用于成本≤毛利 35% 判定）。
     """
@@ -567,15 +622,15 @@ def compute_performance(equity: pd.Series, rets: pd.Series,
     drawdown = (eq - running_max) / running_max
     max_dd = abs(drawdown.min())
 
-    # 夏普（1h 年化）
+    # 夏普（年化因子由调用方传入，已按 interval 派生）
     std = rets.std()
     sharpe = float(rets.mean() / std * annualize_factor) if std > 0 else 0.0
 
     # Calmar = 年化收益 / 最大回撤
-    # 尺度耦合修复（第四轮 15m/30m 试跑前置）：年化收益须与 annualize_factor 同源。
-    # 旧版硬编码 365×24(=1h bars/年)，对 4h/1d 升尺度把 Calmar 高估 4×/24×，
-    # 对 15m/30m 降尺度会低估 4×/2×。annualize_factor = √(bars_per_year)，
-    # 故 bars_per_year = annualize_factor²；1h 默认值下结果与原式完全一致。
+    # 尺度耦合修复（第四轮）：年化收益须与 annualize_factor 同源。
+    # annualize_factor = √(bars_per_year)，故 bars_per_year = annualize_factor²。
+    # 加密 7×24 的 1h 下 √(8760)² = 8760，与旧版硬编码 365×24 完全一致；
+    # 旧版对 4h/1d 会把 Calmar 高估 4×/24×，对 15m/30m 低估 4×/2×。
     ann_return = rets.mean() * (annualize_factor ** 2)
     calmar = float(ann_return / max_dd) if max_dd > 0 else float("inf")
 

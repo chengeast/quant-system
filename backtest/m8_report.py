@@ -39,11 +39,15 @@ from src.monitoring_layer.monitoring import CryptoMonitorPolicy
 # 数据指纹（golden value 快照用，固定数据 + 固定种子）
 # ============================================================================
 
-def data_fingerprint() -> Dict[str, str]:
-    """算 cache 目录 4 个 1h 410d parquet 的 SHA256（前 16 位），作数据指纹。"""
-    cache = ROOT / "data" / "cache"
-    files = ["ETH_USDT_1h_410d.parquet", "SOL_USDT_1h_410d.parquet",
-             "BTC_USDT_1h_410d.parquet"]
+def data_fingerprint(cfg=None) -> Dict[str, str]:
+    """算本次回测实际使用的 3 个 parquet 的 SHA256（前 16 位），作数据指纹。
+
+    文件名由 BacktestConfig 提供，不写死 1h 数据集（周期参数化）。
+    """
+    if cfg is None:
+        cfg = BacktestConfig()
+    cache = ROOT / cfg.cache_dir
+    files = [cfg.leg_a_file, cfg.leg_b_file, cfg.benchmark_file]
     fp = {}
     for f in files:
         p = cache / f
@@ -103,11 +107,14 @@ def main() -> int:
     out_dir = ROOT / "backtest" / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    cfg = BacktestConfig(seed=42)
+    tf = cfg.timeframe
     print("=" * 70)
-    print("M8 回测报告 · ETH_USDT × SOL_USDT · 410 天 1h 深数据")
+    print(f"M8 回测报告 · {cfg.leg_a_file} × {cfg.leg_b_file}")
+    print(f"周期 {tf.interval}｜{tf.annualize_label}｜"
+          f"交易日历 {tf.hours_per_day:g}h×{tf.trading_days_per_year:g}d")
     print("=" * 70)
 
-    cfg = BacktestConfig(seed=42)
     bt = Backtester(cfg)
     res = bt.run()
 
@@ -119,7 +126,7 @@ def main() -> int:
     print(f"  总净收益 (峰值): {m['total_return']:+.2%}")
     print(f"  总净收益 (稳态 0.5×): {m['steady_total_return']:+.2%}")
     print(f"  最大回撤: {m['max_drawdown']:.2%}")
-    print(f"  夏普 (1h 年化 √(365×24)): {m['sharpe']:.3f}")
+    print(f"  夏普 ({tf.annualize_label}): {m['sharpe']:.3f}")
     print(f"  Calmar: {m['calmar']:.3f}")
     print(f"  极端段 (2026-02-04~02-10) PnL: {m['extreme_pnl']:+.4%} "
           f"{'✅不亏' if m['extreme_survived'] else '❌亏损'}")
@@ -143,7 +150,8 @@ def main() -> int:
     # ---- 暴露的工程缺陷（M8 价值）----
     print("\n[M8 暴露的工程缺陷]（中期会 A1-A8 行动清单触发项）")
     print("  D8（未来函数）：M8 主循环已按 t 出信号 / t+1 成交落实 ✅")
-    print("  D9（年化口径）：M8 报告已注明 1h √(365×24) ✅")
+    print(f"  D9（年化口径）：由 timeframe 按 {tf.interval} 派生 "
+          f"({tf.annualize_label}) ✅")
     print("  M3 h 越界（P1 已修）：主窗口 OLS 越界 → 短窗口重估 + 钳制到 [0.5,2]，打 DEGRADED 标记")
     print("     （旧：越界即 INVALID → 持仓态 M4 invalid_signal_exit 反复强平损耗；")
     print("     新：DEGRADED 允许策略运行，仅重估失败 → INVALID 为最后出口；")
@@ -162,7 +170,15 @@ def main() -> int:
     snapshot = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "seed": cfg.seed,
-        "data_fingerprint": data_fingerprint(),
+        # 周期元数据（M9-b 看板动态渲染用；新增字段，metrics/gates 口径不变）
+        "interval": tf.interval,
+        "bars_per_hour": tf.bars_per_hour,
+        "bars_per_year": tf.bars_per_year,
+        "annualize_factor": tf.annualize_factor,
+        "annualize_label": tf.annualize_label,
+        "hours_per_day": tf.hours_per_day,
+        "trading_days_per_year": tf.trading_days_per_year,
+        "data_fingerprint": data_fingerprint(cfg),
         "metrics": {k: (float(v) if isinstance(v, (int, float, np.floating)) else v)
                     for k, v in m.items() if k != "extreme_window"},
         "gates": {k: (bool(v) if not isinstance(v, (int, float, np.bool_)) else
@@ -201,14 +217,17 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
     eq = res.equity_curve.dropna()
     data_start = pd.to_datetime(eq.index.min(), unit="s").strftime("%Y-%m-%d")
     data_end = pd.to_datetime(eq.index.max(), unit="s").strftime("%Y-%m-%d")
+    span_days = round((eq.index.max() - eq.index.min()) / 86_400)
+    tf = res.cfg.timeframe
     # 动态计算，避免报告里残留旧口径硬编码（成本模型修正后数值会变）
     gross_sum = sum(float(t.get("pnl", 0.0)) for t in res.trades)
     n_trades = len(res.trades)
 
     lines = [
-        "# M8 回测报告 · ETH_USDT × SOL_USDT 统计套利 MVP",
+        f"# M8 回测报告 · {res.cfg.leg_a_file} × {res.cfg.leg_b_file} 统计套利 MVP",
         "",
-        f"> 数据：410 天 1h 深数据（{data_start} → {data_end}，{m['bars']} bar）",
+        f"> 数据：{span_days} 天 {tf.interval} 深数据（{data_start} → {data_end}，{m['bars']} bar）",
+        f"> 年化口径：{tf.annualize_label}（由周期参数派生，非写死 1h）",
         f"> 主循环：M3 信号 → M4 决策 → M5 风控 → M6 执行 → M7 监控（t+1 跨 bar 成交）",
         f"> 生成时间：{snapshot['ts']}",
         f"> golden value：seed={snapshot['seed']}，数据指纹 {snapshot['data_fingerprint']}",
@@ -237,7 +256,7 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
         "## 3. 极端段（2024-09 的窗口内等价替代）",
         "",
         f"冻结门槛 `must_survive_extreme_window` 原值 2024-09，但数据窗口为 "
-        f"{data_start} → {data_end}（410 天，9841 bar），**不含 2024-09**。"
+        f"{data_start} → {data_end}（{span_days} 天，{m['bars']} bar），**不含 2024-09**。"
         "按用户裁决（phase5 中期会）改为窗口内真实极端段 "
         "**2026-02-04 ~ 02-10**（该段 7 日累计 −25.7%，其中 02-05 单日 −14.0%）。",
         "",
@@ -250,7 +269,7 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
         "| # | 缺陷 | 影响 | 处置 |",
         "|---|------|------|------|",
         "| D8 | 未来函数 | 主循环 t 出信号 / t+1 成交 | ✅ 已落实 |",
-        "| D9 | 年化口径 | 1h 用 √(365×24)，区别于 1min √(252×144) | ✅ 已注明 |",
+        f"| D9 | 年化口径 | {tf.interval} 由 timeframe 派生（{tf.annualize_label}），不写死 1h | ✅ 已注明 |",
         "| M3-h | h 越界 INVALID 过多 | 410 天约 5.3% bar h∉[0.5,2.0] → INVALID | ✅ 已修（P1 短窗重估 + 钳制 + DEGRADED 标记）|",
         "| M5-regime | regime 拒单率累计熔断 | 一次 INVALID 即 halt 全段 | ✅ 已修（regime 不计拒单率）|",
         f"| 成本口径 | 旧 M8 只计 taker 0.1%，漏 M6 PaperBroker 滑点 4bp/边 | 真实成本 = 单腿名义市值 ×2×(taker+slip)，成本上修 1.4× | ✅ 已修（第三轮辩论 P4）|",

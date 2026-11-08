@@ -15,6 +15,26 @@ frozen_by: "phase2-quant-debate"
 frozen_date: "2026-11-06"
 owner: "quant_experts_A_B_C"
 
+# ---- 周期参数（用户 2026-11-08 裁决：「1h 周期怎么能写死呢？这是一个周期参数。不能写死」）----
+# 单一事实源：src/core/timeframe.py。本段只声明「默认周期 + 市场交易日历 + 防呆规则」；
+# 所有派生量（bar 秒数 / bars_per_hour / bars_per_day / bars_per_year /
+# annualize_factor / bar_ms / 最大可拉天数）一律由 interval + 交易日历计算，
+# 代码与配置中禁止再散落 1h / 365×24 / 3_600_000 等尺度常数。
+# 注意：interval 是「回测调用参数」而非全局常量 —— 第四轮 15m/30m 对照实验
+# 就是在同一进程里对每个实验传不同 BacktestConfig(interval=...)。
+timeframe:
+  default_interval: "1h"           # 唯一声明点；代码侧 DEFAULT_INTERVAL 须与之相同（验收强制校验）
+  hours_per_day: 24.0              # 加密 7×24；A 股填 4
+  trading_days_per_year: 365.0     # 加密 365；A 股填 252
+  annualize_factor: "sqrt(trading_days_per_year * hours_per_day * 3600 / interval_seconds)"
+  reject_unknown_interval: true         # 未知周期报错，绝不静默回退 1h（旧 gate_client 的坑）
+  reject_scale_constant_mismatch: true  # 手写 bars_per_hour/annualize_factor 与派生不符即报错
+  validate_data_filename: true          # 数据文件名声明周期须与 interval/data_interval 一致
+  native_intervals: ["1m", "5m", "15m", "30m", "1h"]   # Gate.io 现货实拉验证
+  aggregated_intervals: ["4h", "1d"]                   # 由 1h 聚合，须显式 data_interval="1h"
+  max_candles_per_request: 10000   # Gate.io 只保留最近 10000 根（实测 2026-11-08）
+  lookback_safety: 0.95            # 默认拉取天数相对理论上限的安全余量
+
 # ---- 币种对筛选（争议点1 多数裁决）----
 pair_screening:
   correlation_min: 0.85        # corr≥0.85 初筛（B、C 收紧，A 的 0.7 被否）
@@ -31,7 +51,11 @@ pair_screening:
   #   530(ETH/XRP) 583(BTC/XRP) 629(SOL/XRP) 932/1152/1416(含DOGE腿,离群)
   # 全量 IQR=[368,856]；DOGE 腿为离群（流动性弱/协整差），标记但不硬删区间边界
   half_life_bars: [368, 856]
-  bars_unit: "1h"
+  # 【数据血缘标注，非运行时周期常量】下面两个 1h 字样只说明该区间是
+  # 410 天 1h 样本的测量结果；运行时周期一律取 timeframe.default_interval /
+  # BacktestConfig(interval=...)。换周期时半衰期 bar 区间须按 bars_per_hour
+  # 等比换算（见 src/signal_layer/pair_screener.py 的 hl_range 派生逻辑）。
+  measured_on_interval: "1h"
   data_driven: true            # 区间由 M2 实算分布得出，非经验值
   outlier_legs: ["DOGE_USDT"]  # DOGE 腿半衰期932-1416bar 为离群，标注；币对优选排除
 
@@ -42,7 +66,7 @@ selected_pair:
   selected_from: "m2_screening_1h_410d"
   corr: 0.982
   eg_p: 0.0186
-  half_life_bars_1h: 407.0
+  half_life_bars_1h: 407.0    # 键名中的 1h 同为数据血缘标注（410 天 1h 样本测量值）
   note: "410天深数据重筛：EG_p 0.0186为最优协整，corr 0.982，半衰期407bar(17天)。"
         "旧BTC/SOL(EG_p 0.0648)在深数据下不达标，已由数据纠正。"
 
@@ -85,7 +109,8 @@ cost_model:
 # MVP 阶段仅落地接口与指标定义，数值待 M8 回测数据校准
 monitoring:
   alpha_decay_monitor:
-    slope_window: 60            # 滚动窗口 bar 数（加密 1h）；突变检测触发重估
+    slope_window: 60            # 滚动窗口 bar 数（非物理时长）：1h→60h、15m→15h；
+                                # 需固定物理时长用 timeframe.bars_for_hours() 换算
     decay_ratio: 0.8           # 信号强度 vs 实现收益比，跌破 0.8 触发重估
     slippage_ratio_window: 30  # 价差回归速度观测窗口
     sigma_compression: 0.7     # 价差 σ 压缩阈值（σ 现值 / 历史 σ 中位数 < 0.7 触发）
@@ -97,9 +122,12 @@ monitoring:
     - "sigma_compression"
   backtest_steady_state_factor: 0.5   # 稳态收益 = 峰值收益 × 0.5（保守起步，M8 校准）
 
-# ---- 年化口径 ----
+# ---- 年化口径（周期参数化后不再写死 1min / 1h 常数）----
+# 旧值 "sqrt(252*144)" 是 1min A股口径的文档债，与加密 7×24 的 1h 实现不符，
+# 且从未被代码读取。现值统一由 timeframe 段派生：annualize_factor = √bars_per_year。
 annualization:
-  sharpe_factor: "sqrt(252*144)"  # 1min 数据年化（数据工程师口径）
+  sharpe_factor: "sqrt(bars_per_year)"   # 由 src/core/timeframe.py 按 interval 派生
+  derived_from: "timeframe"
 
 # ============================================================================
 # 审计区（append-only，记录每次参数变更。变更需带操作人 + 前后值 + 理由）
@@ -151,6 +179,11 @@ audit:
     action: "checksum_refresh"
     reason: "参数变更流程留痕"
     checksum: "74cc9c3dbec64f35fef01a57db6d19acbb691a2207175f87298e2642d9d5e3a9"
+  - ts: "2026-11-08"
+    actor: "user_directive"
+    action: "timeframe_parameterization"
+    reason: "用户裁决「1h 周期不能写死，这是一个周期参数」：新增 timeframe 段声明默认周期/市场交易日历/防呆规则；修正 annualization 过时 1min 口径为按 interval 派生；bars_unit 改名 measured_on_interval 明确为数据血缘标注（非运行时常量）；冻结门槛、信号参数、成本模型、实盘开关均未改动。"
+    checksum: "fd33325c9493b0ed5a1eafdde996164187886a81474d7f10a9e994138732244c"
 live_trading:
   enabled: false               # 硬边界：MVP 默认关闭
   require_manual_approval: true

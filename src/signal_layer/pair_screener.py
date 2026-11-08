@@ -26,6 +26,8 @@ from typing import Optional
 
 from statsmodels.tsa.stattools import adfuller
 
+from src.core.timeframe import DEFAULT_INTERVAL, resolve_timeframe
+
 
 # 候选币种（USDT 计价，按 1h 成交额常见量级排的，实际用数据筛）
 DEFAULT_CANDIDATES = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"]
@@ -35,8 +37,10 @@ CORR_MIN = 0.85
 DAILY_VOL_MIN_USD = 50_000_000.0
 EG_ADF_P_MAX = 0.05
 JOH_P_MAX = 0.05
-# 半衰期 bar 数（1h 尺度）：25–50 bars × 12 = 300–600，但 1h 30 天只有 720 bar，
-# 所以 MVP 用半衰期 [24, 96] 根 1h bar（≈ 1–4 天）作为可行区间
+# 半衰期基准区间，单位 = 1h bar：25–50 bars × 12 = 300–600，但 1h 30 天只有
+# 720 bar，所以 MVP 用 [24, 96] 根 1h bar（≈ 1–4 天）作为可行区间。
+# 区间以「1h 物理时间」定义，换周期时由 screen_pairs 按 bars_per_hour 比例换算，
+# 避免把 1h bar 数直接套到 15m/4h 数据上（用户 2026-11-08「周期不能写死」）。
 HL_BARS_RANGE_1H = (24, 96)
 
 
@@ -64,9 +68,13 @@ def _ols_hedge_ratio(a: pd.Series, b: pd.Series) -> float:
     return float(coeffs[1])
 
 
-def _half_life_bars(spread: pd.Series, bars_per_hour: int = 1) -> float:
-    """spread_t 对 spread_{t-1} 回归系数 β，半衰期 = ln(0.5)/ln(1-β) 的离散近似。
-    实际：H = ln(0.5) / ln(ρ)，ρ = spread 一阶自相关系数。ρ 越接近 1，半衰期越长。
+def _half_life_bars(spread: pd.Series) -> float:
+    """半衰期，单位 = 当前周期的 bar 数。
+
+    spread_t 对 spread_{t-1} 回归系数 β，H = ln(0.5)/ln(1-β) 的离散近似；
+    实际用 H = ln(0.5)/ln(ρ)，ρ = spread 一阶自相关，ρ 越接近 1 半衰期越长。
+    旧签名带 bars_per_hour=1 但函数体从未使用，属假参数化，已删除；
+    周期换算统一在 screen_pairs 的 hl_range 上做，半衰期定义本身与周期无关。
     """
     x = spread.to_numpy()
     if len(x) < 10:
@@ -91,16 +99,23 @@ def _johansen_trace_p(spread: pd.Series) -> Optional[float]:
         return None
 
 
-def screen_pairs(fetcher, candidates: list[str], interval: str = "1h",
+def screen_pairs(fetcher, candidates: list[str], interval: str = DEFAULT_INTERVAL,
                   lookback_days: int = 30,
                   corr_min: float = CORR_MIN,
                   daily_vol_min: float = DAILY_VOL_MIN_USD,
-                  hl_range: tuple[float, float] = HL_BARS_RANGE_1H,
+                  hl_range: Optional[tuple[float, float]] = None,
                   eg_p_max: float = EG_ADF_P_MAX) -> list[PairScore]:
     """对候选币种做两两配对筛选，输出按综合得分排序的 PairScore 列表。
 
     综合得分 = 排序键：(通过全门槛 ? 0 : 1, eg_p 越小越好, 半衰期越接近中值越好)
+
+    hl_range 以 1h bar 为基准单位；未显式指定时按 interval 的 bars_per_hour
+    等比换算（物理时间等价），1h 下与旧版 HL_BARS_RANGE_1H 完全一致。
     """
+    tf = resolve_timeframe(interval)
+    if hl_range is None:
+        k = tf.bars_per_hour / resolve_timeframe("1h").bars_per_hour
+        hl_range = (HL_BARS_RANGE_1H[0] * k, HL_BARS_RANGE_1H[1] * k)
     klines = {}
     daily_vols = {}
     for p in candidates:

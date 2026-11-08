@@ -9,9 +9,10 @@
    故 15m 最多 ~104 天、30m 最多 ~208 天，日历窗口比 1h 的 410 天短 4×/2×。
    冻结门槛的极端段 2026-02-04~02-10 **不在窗口内**，本次记 N/A（不可评估），
    绝不把 extreme_pnl=0 当作「不亏 ✅ 通过」。
-2. 尺度参数必须显式改，否则夏普/Calmar/超时全是错的：
-   bars_per_hour = 1/scale (15m=4, 30m=2)、annualize_factor = √(365×24/scale)；
-   engine.compute_performance() 的 ann_return 已修为与 annualize_factor 同源。
+2. 尺度参数不再手写（用户 2026-11-08「周期不能写死」）：只向 BacktestConfig
+   传 interval，bars_per_hour / annualize_factor / bar_ms 由
+   src/core/timeframe.py 派生；engine.compute_performance() 的 ann_return
+   与 annualize_factor 同源。派生值与旧手写公式 √(365×24/scale) 逐项一致。
 3. 冻结参数、成本模型、回撤/夏普/Calmar/连亏/成本门槛一律不放宽。
    hl_range 在 M3 中仅赋值、不参与状态判定（已核实），故保留 (368,856) 仅作留痕。
 
@@ -43,9 +44,9 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 PAIRS = ["XRP/DOGE", "SOL/DOGE", "BTC/ETH"]          # P3 保留的 3 个币对
 SYMS = ["XRP", "DOGE", "SOL", "BTC", "ETH"]          # 含 BTC 基准
-SCALES = {"1h": 1.0, "1h_95d": 1.0, "1h_195d": 1.0,
-          "15m": 0.25, "30m": 0.5}                     # 相对 1h 的 bar 长度
-LOOKBACK = {"1h": 410, "15m": 95, "30m": 195}          # 实测可达（留余量）
+LOOKBACK = {"1h": 410, "15m": 95, "30m": 195}          # 已落盘数据集的实测窗口，
+# 是缓存文件名的一部分（{sym}_USDT_{iv}_{LOOKBACK[iv]}d.parquet），
+# 属数据资产标识而非可推导的尺度参数，故不改动。
 # 同窗口 1h 对照：把 410 天 1h 数据截到 15m/30m 各自的时间范围再跑一遍。
 # 15m/30m 的日历窗口比 1h 短，不同行情段不能直接比绝对收益；
 # 加这组对照可把「尺度效应」与「窗口效应」分离开。
@@ -64,6 +65,11 @@ COMBOS = [
 
 _SIG: dict = {}
 _BM: dict = {}
+
+
+def interval_of(iv: str) -> str:
+    """实验标签 → 真实 K 线周期；1h_95d/1h_195d 是 1h 数据的同窗口裁剪。"""
+    return "1h" if iv.startswith("1h") else iv
 
 
 def _file(sym: str, iv: str) -> Path:
@@ -136,8 +142,8 @@ def run_one(pair: str, iv: str, tag: str, entry_s: float,
             exit_s: float, timeout_f: float, sig: pd.DataFrame,
             bm: pd.DataFrame, meta: dict) -> dict:
     a, b = pair.split("/")
-    scale = SCALES[iv]
     cfg = BacktestConfig(
+        interval=interval_of(iv),       # 尺度参数唯一声明点
         leg_a_file=_file(a, iv).name,
         leg_b_file=_file(b, iv).name,
         benchmark_file=_file("BTC", iv).name,
@@ -146,8 +152,6 @@ def run_one(pair: str, iv: str, tag: str, entry_s: float,
         stop_loss_sigma=2.0, timeout_hours=3.0,
         timeout_half_life_factor=timeout_f,
         hl_range=HL_RANGE,
-        bars_per_hour=1.0 / scale,
-        annualize_factor=float(np.sqrt(365.0 * 24.0 / scale)),
         leg_equity_pct=0.05,
         taker_fee_pct=0.001, slippage_bps=4.0,
         extreme_window_start=EXTREME_START,
@@ -166,8 +170,8 @@ def run_one(pair: str, iv: str, tag: str, entry_s: float,
         "median_h": meta["median_h"], "n_entries_3s": meta["n_entries_3s"],
         "invalid_rate": meta["invalid_rate"], "degraded_rate": meta["degraded_rate"],
         "entry_sigma": entry_s, "exit_sigma": exit_s, "timeout_factor": timeout_f,
-        "bars_per_hour": round(1.0 / scale, 2),
-        "annualize_factor": round(float(np.sqrt(365.0 * 24.0 / scale)), 2),
+        "bars_per_hour": round(cfg.timeframe.bars_per_hour, 2),
+        "annualize_factor": round(cfg.timeframe.annualize_factor, 2),
         "n_trades": n,
         "gross_total": round(gross, 2), "cost_total": round(cost, 2),
         "gross_per_trade": round(gross / n, 4) if n else None,

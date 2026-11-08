@@ -28,6 +28,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# 验收夹具显式声明 1h 序列（测试输入固定，不随项目默认周期变化）；
+# 时间步长从周期单一事实源派生，不在脚本里写死 1h 的毫秒步长。
+from src.core.timeframe import resolve_timeframe
+BAR_MS = resolve_timeframe("1h").bar_ms
+
 import numpy as np
 import pandas as pd
 
@@ -147,7 +152,7 @@ def check_threshold_boundary(sig: pd.DataFrame) -> bool:
     pos_f = PositionSnapshot(state="LONG_SPREAD", entry_ts_ms=entry_ts,
                              position_qty=5.0)
     # 持仓 500 bar（=500h 在 1h K线），超过 480 bar 超时
-    intent_f = strat.decide(f_sig, pos_f, ts_ms=entry_ts + 500 * 3_600_000)
+    intent_f = strat.decide(f_sig, pos_f, ts_ms=entry_ts + 500 * BAR_MS)
     ok_f = (intent_f is not None) and (intent_f.reason == "timeout")
     ok &= ok_f
     print(f"  [F] LONG 持仓500bar(>480超时) → reason={intent_f.reason if intent_f else None} "
@@ -282,7 +287,7 @@ def check_reevaluation_hook(sig: pd.DataFrame) -> bool:
     """验收 4：re-estimation 钩子可触发（phase4 §9.2）。"""
     strat = MeanReversionStrategy(reestimate_window=60, reestimate_decay_ratio=0.1)
     n = 120
-    ts_arr = np.arange(n) * 3_600_000
+    ts_arr = np.arange(n) * BAR_MS
     np.random.seed(42)
     z_arr = np.concatenate([
         np.random.normal(0, 0.5, 60),

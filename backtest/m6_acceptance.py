@@ -14,6 +14,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# 验收夹具显式声明 1h 序列（测试输入固定，不随项目默认周期变化）；
+# 时间步长从周期单一事实源派生，不在脚本里写死 1h 的毫秒步长。
+from src.core.timeframe import resolve_timeframe
+BAR_MS = resolve_timeframe("1h").bar_ms
+
 from src.core.market_ifaces import OrderIntent, FillReport
 from src.execution_layer.execution_manager import (
     PaperBroker, Reconciler, ExecutionManager, LocalPosition,
@@ -26,7 +31,7 @@ def check_fill_report_fields() -> bool:
     intent = OrderIntent(
         order_id="m6-test-001", ts_ms=0, symbol="long_spread", side="buy",
         qty=10.0, limit_price=100.0, strategy_tag="mean_reversion",
-        confidence=1.0, ttl_ms=3_600_000,
+        confidence=1.0, ttl_ms=BAR_MS,
     )
     fill = broker.execute(intent)
 
@@ -127,7 +132,7 @@ def check_portfolio_tracking() -> bool:
     intent_buy = OrderIntent(
         order_id="m6-pf-001", ts_ms=0, symbol="A", side="buy",
         qty=10.0, limit_price=100.0, strategy_tag="test",
-        confidence=1.0, ttl_ms=3_600_000,
+        confidence=1.0, ttl_ms=BAR_MS,
     )
     fill_buy = exec_mgr.submit(intent_buy)
     pos_after_buy = exec_mgr.portfolio.get_position("A")
@@ -140,7 +145,7 @@ def check_portfolio_tracking() -> bool:
     intent_sell = OrderIntent(
         order_id="m6-pf-002", ts_ms=1000, symbol="A", side="sell",
         qty=5.0, limit_price=110.0, strategy_tag="test",
-        confidence=0.5, ttl_ms=3_600_000,
+        confidence=0.5, ttl_ms=BAR_MS,
     )
     fill_sell = exec_mgr.submit(intent_sell)
     pos_after_sell = exec_mgr.portfolio.get_position("A")
@@ -153,7 +158,7 @@ def check_portfolio_tracking() -> bool:
     intent_close = OrderIntent(
         order_id="m6-pf-003", ts_ms=2000, symbol="A", side="sell",
         qty=5.0, limit_price=120.0, strategy_tag="test",
-        confidence=0.5, ttl_ms=3_600_000,
+        confidence=0.5, ttl_ms=BAR_MS,
     )
     exec_mgr.submit(intent_close)
     pos_after_close = exec_mgr.portfolio.get_position("A")

@@ -55,6 +55,13 @@ def render_dashboard() -> str:
     gates = golden.get("gates", {})
     fp = golden.get("data_fingerprint", {})
     gen_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    # 周期元数据由 M8 golden_value.json 提供；缺失时显示「—」，绝不默认为 1h
+    interval = golden.get("interval") or "—"
+    ann_label = golden.get("annualize_label") or "年化口径未声明"
+    span_days = (round((ts[-1] - ts[0]) / 86_400)
+                 if len(ts) >= 2 and ts[0] is not None and ts[-1] is not None
+                 else None)
+    span_text = f"{span_days} 天 " if span_days is not None else ""
 
     # JS 数组（NaN → null）
     def js_arr(v):
@@ -82,7 +89,8 @@ def render_dashboard() -> str:
         ("净收益(峰值)", pct(metrics.get("total_return")), "净"),
         ("稳态(0.5×)", pct(metrics.get("steady_total_return")), "稳"),
         ("最大回撤", num(metrics.get("max_drawdown")) + "%" if metrics.get("max_drawdown") is not None else "—", "回撤"),
-        ("夏普(1h年化)", num(metrics.get("sharpe"), 3), "夏普"),
+        (f"夏普({interval}年化)" if interval != "—" else "夏普(年化)",
+         num(metrics.get("sharpe"), 3), "夏普"),
         ("Calmar", num(metrics.get("calmar"), 3), "Calmar"),
         ("极端段PnL", pct(metrics.get("extreme_pnl")) + (" ✅" if metrics.get("extreme_survived") else " ❌"), "极端段"),
         ("跑赢BTC", pct(metrics.get("benchmark_total_return")) + (" ✅" if metrics.get("beat_benchmark") else " ❌"), "基准"),
@@ -156,8 +164,8 @@ def render_dashboard() -> str:
 </head>
 <body>
 <header>
-  <h1>M8 回测看板 · ETH_USDT × SOL_USDT · 410 天 1h 统计套利 MVP</h1>
-  <div class="meta">生成 {gen_ts}<br>seed={golden.get("seed","?")} · {n_alerts} 告警</div>
+  <h1>M8 回测看板 · ETH_USDT × SOL_USDT · {span_text}{interval} 统计套利 MVP</h1>
+  <div class="meta">生成 {gen_ts}<br>seed={golden.get("seed","?")} · {n_alerts} 告警<br>{ann_label}</div>
 </header>
 <main>
   <div class="cards">

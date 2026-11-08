@@ -15,6 +15,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from src.core.timeframe import resolve_timeframe
+
 GATE_BASE = "https://api.gateio.ws/api/v4"
 UA = {"User-Agent": "Mozilla/5.0 (quant-system)"}
 ROOT = Path(__file__).resolve().parents[2]
@@ -74,8 +76,9 @@ class GateClient:
     def fetch_candles(self, pair: str, interval: str, from_ts: int, to_ts: int,
                       window_days: int = 7, sleep_s: float = 0.3) -> list:
         """分页拉取 [from_ts, to_ts] 的全量 K 线（每次 ≤1000 根，规避频率限制）。"""
-        interval_s = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-                      "1h": 3600, "4h": 14400, "1d": 86400}.get(interval, 3600)
+        # 周期秒数由单一事实源派生；未知周期直接报错，绝不 .get(..., 3600)
+        # 静默回退 1h（旧实现会按错误步长分页，拉出与声明周期不符的数据）。
+        interval_s = resolve_timeframe(interval).seconds
         window = window_days * 86400
         step = max(window // 2, interval_s)
         cur = from_ts
@@ -114,10 +117,19 @@ class GateClient:
 
 if __name__ == "__main__":
     import datetime
+    import sys
+    from src.core.timeframe import max_lookback_days
+
     c = GateClient()
     now = int(time.time())
-    print("测试 1h 365 天分页拉取（只读）...")
-    raw = c.fetch_candles("BTC_USDT", "1h", now - 365 * 86400, now, window_days=7)
+    # 冒烟周期由命令行声明（默认 1h），窗口与深度都由周期派生，不写死 1h/365 天/7 天
+    iv = sys.argv[1] if len(sys.argv) > 1 else "1h"
+    tf = resolve_timeframe(iv)
+    days = min(365, max_lookback_days(iv))
+    window_days = max(1, min(7, 900 // max(1, int(tf.bars_per_day))))
+    print(f"测试 {iv} {days} 天分页拉取（只读，窗口 {window_days} 天）...")
+    raw = c.fetch_candles("BTC_USDT", iv, now - days * 86400, now,
+                          window_days=window_days)
     if raw:
         t0 = int(raw[0][0])
         t1 = int(raw[-1][0])

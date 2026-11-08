@@ -25,6 +25,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Callable, Any
 
+# 周期参数单一事实源（纯标准库模块，无循环依赖，故顶层导入）
+from src.core.timeframe import (
+    DEFAULT_INTERVAL, MS_PER_SECOND, SECONDS_PER_HOUR, resolve_timeframe,
+)
+
 
 # ============================================================================
 # 告警事件
@@ -410,18 +415,25 @@ class CryptoMonitorPolicy:
     """加密市场监控实现（phase4 §5 市场相关）。
 
     市场相关部分：
-      - 24h 发散观测窗口（加密 7×24，窗口=24 bar 1h）
+      - 24h 发散/告警去重窗口：按**物理时间**（毫秒）表达，与 K 线周期无关
       - 数据断流阈值（K线缺失 3 bar 即断流，区别于 A股 交易时段）
-      - alpha 衰减监控参数（slope_window 60 bar 1h ≈ 60h）
+      - alpha 衰减窗口以 **bar 数**定义（slope_window=60 bar、
+        slippage_ratio_window=30 bar）；物理时长随周期变化：
+        1h → 60h，15m → 15h。若需固定物理时长，用
+        src.core.timeframe.bars_for_hours(hours, interval) 换算后再传入。
+    周期由 interval 注入（用户 2026-11-08「周期不能写死」），不再假定 1h。
     未来 A股/期货换 MonitorPolicy 实现类（交易时段断流判定不同）。
     """
 
     def __init__(self,
+                 interval: str = DEFAULT_INTERVAL,
                  slope_window: int = 60,
                  decay_ratio: float = 0.8,
                  slippage_ratio_window: int = 30,
                  sigma_compression: float = 0.7):
-        self.dedupe_window_ms = 24 * 3_600_000      # 24h 发散/告警去重窗口
+        self.timeframe = resolve_timeframe(interval)
+        # 24 是业务定义的「发散观测窗口小时数」，不是 K 线周期
+        self.dedupe_window_ms = int(24 * SECONDS_PER_HOUR * MS_PER_SECOND)
         self.alpha_monitor = AlphaDecayMonitor(
             slope_window=slope_window,
             decay_ratio=decay_ratio,

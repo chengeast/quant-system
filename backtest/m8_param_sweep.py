@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from src.backtest.engine import Backtester, BacktestConfig
+from src.core.timeframe import resolve_timeframe
 from src.signal_layer.mean_reversion_signals import MeanReversionSignals
 
 CACHE = ROOT / "data" / "cache"
@@ -123,7 +124,7 @@ def grid_one(pair: str, scale: int, hedge_window: int = 60) -> pd.DataFrame:
     valid = np.isin(st, ["OK", "DEGRADED"]) & np.isfinite(z)
     hv = hl[np.isfinite(hl) & (hl > 0)]
     median_h = float(np.median(hv)) if len(hv) else 8.0
-    bars_per_hour = 1.0 / scale
+    bars_per_hour = resolve_timeframe(scale_label(scale)).bars_per_hour
     n = len(z)
     rows = []
 
@@ -193,6 +194,9 @@ def run_bt(pair: str, scale: int, entry_s: float, exit_s: float,
     sig = get_sig(pair, scale, hedge_window)
     bm = get_bm(scale)
     cfg = BacktestConfig(
+        # 读 1h parquet 后按 scale 根聚合成 4h/1d；回测周期与源数据周期分开声明
+        interval=scale_label(scale),
+        data_interval="1h",
         leg_a_file=f"{a}_USDT_1h_410d.parquet",
         leg_b_file=f"{b}_USDT_1h_410d.parquet",
         benchmark_file="BTC_USDT_1h_410d.parquet",
@@ -205,8 +209,6 @@ def run_bt(pair: str, scale: int, entry_s: float, exit_s: float,
         max_total_exposure=max(0.20, leg_equity_pct * 4),
         taker_fee_pct=taker_fee_pct, slippage_bps=slippage_bps,
         hl_range=HL_RANGE,
-        bars_per_hour=1.0 / scale,
-        annualize_factor=float(np.sqrt(365.0 * 24.0 / scale)),
     )
     t0 = time.time()
     bt = Backtester(cfg)

@@ -13,6 +13,11 @@ M1 · 数据层 —— Gate.io 现货 K 线接入、清洗、两腿对齐、Parq
   - 实测可达窗口：15m 95 天 / 9121 根，30m 195 天 / 9361 根（2026-11-08 拉取）
   - 单次请求 ≤1000 根，深历史需 from/to 分页 + 频率退避
   - 有 GATE_API_KEY 时走 GateClient（签名只读）拉深历史；无则回退公开接口（~30 天）
+
+周期参数化（用户 2026-11-08 裁决「周期不能写死」）：
+  interval→秒数、每日 bar 数、最大可拉天数一律来自 src/core/timeframe.py，
+  本文件不再自带映射表，也不再写 24/48/96/288 根每日常量；
+  未知 interval 直接报错，绝不静默按 1h 处理。
 """
 
 from __future__ import annotations
@@ -25,24 +30,22 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
+from src.core.timeframe import (
+    INTERVAL_SECONDS, MAX_CANDLES, max_lookback_days, resolve_timeframe,
+)
+
 GATE_BASE = "https://api.gateio.ws/api/v4"
 UA = {"User-Agent": "Mozilla/5.0 (quant-system)"}
 
-# 各粒度默认拉取深度（天）—— 受 10000 根上限约束，超出自动截断
+# 各粒度默认拉取深度（天）—— 由周期 + 10000 根上限推导，不写死天数。
 # 实测 2026-11-08：请求早于「最近 10000 根」时 Gate.io 直接返回 400
 #   {"label":"INVALID_PARAM_VALUE","message":"Candlestick too long ago.
 #    Maximum 10000 points ago are allowed"}，故降尺度只能缩短日历窗口。
-MAX_CANDLES = 10000
+# 仅列本项目实拉验证过的 Gate.io 现货粒度；4h/1d 等聚合尺度不由此表约束。
+GATE_NATIVE_INTERVALS = ("1m", "5m", "15m", "30m", "1h")
 DEFAULT_LOOKBACK_DAYS = {
-    "1h": min(410, MAX_CANDLES // 24),    # ≈ 410 天（10000//24=416，留余量）
-    "30m": 195,                           # 上限 10000//48=208 天，留余量
-    "15m": 95,                            # 上限 10000//96=104 天，留余量
-    "5m": 33,                             # 上限 10000//288=34.7 天
-    "1m": 7,                              # 上限 10000//1440=6.9 天
-}
-# 15m/30m 为第四轮「降尺度再试」新增（Gate.io 现货支持这两个 interval）
-INTERVAL_SECONDS = {
-    "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600,
+    iv: max_lookback_days(iv, max_candles=MAX_CANDLES)
+    for iv in GATE_NATIVE_INTERVALS
 }
 
 # 清洗阈值（数据工程师口径，可被 strategy_params 覆盖）
@@ -96,9 +99,10 @@ class GateKLineFetcher:
         有 GATE_API_KEY 时走 GateClient（签名只读）拉深历史（~410 天）；
         无 key 时回退公开接口（~30 天）。
         """
-        if interval not in INTERVAL_SECONDS:
-            raise ValueError(f"不支持的 interval: {interval}")
-        days = lookback_days or DEFAULT_LOOKBACK_DAYS.get(interval, 30)
+        # 未知周期在这里就报错，绝不静默按 1h 分页拉错数据
+        resolve_timeframe(interval)
+        days = lookback_days or DEFAULT_LOOKBACK_DAYS.get(
+            interval, max_lookback_days(interval))
         now = int(time.time())
         end = end_ts if end_ts is not None else now
         start = start_ts if start_ts is not None else end - days * 86400
@@ -147,9 +151,9 @@ class GateKLineFetcher:
 
     @staticmethod
     def _window_days(interval: str) -> int:
-        """分页窗口大小（天），使每窗口 K 线数 < 1000。"""
-        is_ = INTERVAL_SECONDS.get(interval, 3600)
-        days = max(1, 900 // (86400 // is_))  # 约 900 根/窗口
+        """分页窗口大小（天），使每窗口 K 线数 < 1000。由周期派生每日 bar 数。"""
+        bars_per_day = resolve_timeframe(interval).bars_per_day
+        days = max(1, 900 // max(1, int(bars_per_day)))  # 约 900 根/窗口
         return min(days, 7)
 
     def _safe_get(self, url: str):
@@ -220,14 +224,15 @@ class GateKLineFetcher:
         df["bad_px"] = bad_px
 
         # 缺口检测：按预期 bar 数生成完整时间轴，缺失 ≥1 bar 标记
-        expected = np.arange(ts[0], ts[-1] + INTERVAL_SECONDS[interval], INTERVAL_SECONDS[interval])
+        bar_s = resolve_timeframe(interval).seconds
+        expected = np.arange(ts[0], ts[-1] + bar_s, bar_s)
         present = set(ts)
         gap = np.zeros(len(df), dtype=bool)
         # 把"该 bar 之前是否有缺口"累积标记（缺口数 >0 的 bar 置 gap=True）
         running = 0
         prev = ts[0]
         for i, t in enumerate(ts):
-            missing = int(t - prev) // INTERVAL_SECONDS[interval] - 1
+            missing = int(t - prev) // bar_s - 1
             running += max(0, missing)
             gap[i] = running > 0
             prev = t
@@ -235,7 +240,8 @@ class GateKLineFetcher:
         return df
 
     # ---------- 对齐（两腿 inner join）----------
-    def align_pair(self, pair_a: str, pair_b: str, interval: str = "5m",
+    # interval 无默认值：周期必须由调用方显式声明，不允许默认 5m/1h（用户 2026-11-08）
+    def align_pair(self, pair_a: str, pair_b: str, interval: str,
                    lookback_days: Optional[int] = None) -> pd.DataFrame:
         """拉取两腿并对齐：resample 到统一 grid 后 inner join。
         缺腿整 bar 丢弃（禁 ffill，避免价差被伪平）。"""

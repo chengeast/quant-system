@@ -15,6 +15,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# 验收夹具显式声明 1h 序列（测试输入固定，不随项目默认周期变化）；
+# 时间步长从周期单一事实源派生，不在脚本里写死 1h 的毫秒步长。
+from src.core.timeframe import resolve_timeframe
+BAR_MS = resolve_timeframe("1h").bar_ms
+
 import numpy as np
 import pandas as pd
 
@@ -55,7 +60,7 @@ def check_exposure_rejection(sig: pd.DataFrame) -> bool:
     intent_over = OrderIntent(
         order_id="test-001", ts_ms=0, symbol="long_spread", side="buy",
         qty=100.0, limit_price=2000.0, strategy_tag="mean_reversion",
-        confidence=1.0, ttl_ms=3_600_000,
+        confidence=1.0, ttl_ms=BAR_MS,
     )
     pos_flat = Position(ts_ms=0, symbol="A", qty=0.0, avg_cost=0.0)
     equity = 10_000.0
@@ -78,7 +83,7 @@ def check_exposure_rejection(sig: pd.DataFrame) -> bool:
     intent_ok = OrderIntent(
         order_id="test-002", ts_ms=0, symbol="long_spread", side="buy",
         qty=0.2, limit_price=2000.0, strategy_tag="mean_reversion",
-        confidence=0.5, ttl_ms=3_600_000,
+        confidence=0.5, ttl_ms=BAR_MS,
     )
     verdict2 = gate2.gate(intent_ok, pos_flat, equity, ts_ms=0)
     ok2 = (verdict2 == RiskVerdict.PASS)
@@ -105,7 +110,7 @@ def check_total_exposure() -> bool:
     intent = OrderIntent(
         order_id="test-003", ts_ms=0, symbol="long_spread", side="buy",
         qty=0.2, limit_price=2000.0, strategy_tag="mean_reversion",
-        confidence=0.5, ttl_ms=3_600_000,
+        confidence=0.5, ttl_ms=BAR_MS,
     )
     # 已有总敞口 1,000 + 新增 400 = 1,400 < 2,000 上限 → 放行
     v_pass = gate.gate(intent, pos_small, equity, ts_ms=0)
@@ -115,7 +120,7 @@ def check_total_exposure() -> bool:
     intent2 = OrderIntent(
         order_id="test-004", ts_ms=0, symbol="long_spread", side="buy",
         qty=0.1, limit_price=2000.0, strategy_tag="mean_reversion",
-        confidence=0.1, ttl_ms=3_600_000,
+        confidence=0.1, ttl_ms=BAR_MS,
     )
     # 已有 2,400 + 新增 200 = 2,600 > 2,000 上限 → 拦截
     v_reject = gate.gate(intent2, pos_big, equity, ts_ms=0)
@@ -141,7 +146,7 @@ def check_emergency_stop() -> bool:
     intent = OrderIntent(
         order_id="test-halt", ts_ms=2_000_000, symbol="long_spread", side="buy",
         qty=0.1, limit_price=100.0, strategy_tag="mean_reversion",
-        confidence=0.1, ttl_ms=3_600_000,
+        confidence=0.1, ttl_ms=BAR_MS,
     )
     pos = Position(ts_ms=0, symbol="A", qty=0.0, avg_cost=0.0)
     verdict = gate.gate(intent, pos, 10_000.0, ts_ms=2_000_000)
@@ -170,7 +175,7 @@ def check_regime_rejection(sig: pd.DataFrame) -> bool:
     intent = OrderIntent(
         order_id="test-regime", ts_ms=0, symbol="long_spread", side="buy",
         qty=0.1, limit_price=100.0, strategy_tag="mean_reversion",
-        confidence=0.1, ttl_ms=3_600_000,
+        confidence=0.1, ttl_ms=BAR_MS,
     )
     pos = Position(ts_ms=0, symbol="A", qty=0.0, avg_cost=0.0)
 
@@ -239,12 +244,12 @@ def check_reject_rate_trigger() -> bool:
     # 制造多 bar 拒单（每 bar 1 笔超额订单）
     # 窗口 5 bar：第 1 笔 1/5=20% 不超（strict >），第 2 笔 2/5=40% > 20% → halt
     for i in range(5):
-        ts = i * 3_600_000  # 每 bar 间隔 1h
+        ts = i * BAR_MS  # 每 bar 间隔 1h
         intent = OrderIntent(
             order_id=f"test-rr-{i}", ts_ms=ts,
             symbol="long_spread", side="buy",
             qty=1000.0, limit_price=2000.0,  # 单笔敞口 2M > 上限
-            strategy_tag="mean_reversion", confidence=1.0, ttl_ms=3_600_000,
+            strategy_tag="mean_reversion", confidence=1.0, ttl_ms=BAR_MS,
         )
         verdict = gate.gate(intent, pos, 10_000.0, ts_ms=ts)
 

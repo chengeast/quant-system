@@ -20,7 +20,8 @@ M4 · 决策层 —— 统计套利（配对交易）进出规则
     - z ≤ -3σ：价差负向偏离 → 开 LONG_SPREAD（买 A 卖 B，等回归）
   离场：
     - 正常：|z| ≤ exit_sigma(0.5σ)（回归到位）
-    - 止损：价差朝持仓方向继续偏离（LONG: z≤-2σ 价差深套；SHORT: z≥+2σ）
+    - 止损：相对开仓点再逆向偏离 stop_loss_sigma（P4 修复；
+      旧版用绝对 ±2σ，与 ±3σ 进场冲突导致开仓即止损）
     - 超时：持仓时长 ≥ max(3h, 1.2×H)
 
 仓位上限红线：持仓态下，若 |z| 进一步超过 entry_sigma（价差朝持仓方向更深偏离），
@@ -43,6 +44,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from src.core.market_ifaces import OrderIntent
+from src.core.timeframe import DEFAULT_INTERVAL, resolve_timeframe
 
 
 @dataclass
@@ -71,17 +73,33 @@ class MeanReversionStrategy:
                  timeout_hours: float = 3.0,
                  timeout_half_life_factor: float = 1.2,
                  position_cap: float = 10.0,
-                 bars_per_hour: int = 1,
+                 interval: str = DEFAULT_INTERVAL,
+                 bars_per_hour: Optional[float] = None,
+                 bar_ms: Optional[float] = None,
                  strategy_tag: str = "mean_reversion",
                  reestimate_window: int = 60,
                  reestimate_decay_ratio: float = 0.8):
+        # 周期参数化：bar 时长 / 每小时 bar 数由 interval 派生，不再写死
+        # 3_600_000 ms 或 bars_per_hour=1（用户 2026-11-08「周期不能写死」）。
+        tf = resolve_timeframe(interval)
+        self.timeframe = tf
+        for name, given, derived in (
+            ("bars_per_hour", bars_per_hour, tf.bars_per_hour),
+            ("bar_ms", bar_ms, float(tf.bar_ms)),
+        ):
+            if given is not None and abs(float(given) - derived) > 1e-6:
+                raise ValueError(
+                    f"{name}={given} 与 interval={interval} 的派生值 "
+                    f"{derived} 不一致；请只改 interval。"
+                )
+        self.bars_per_hour = tf.bars_per_hour
+        self.bar_ms = tf.bar_ms
         self.entry_sigma = entry_sigma
         self.exit_sigma = exit_sigma
         self.stop_loss_sigma = stop_loss_sigma
         self.timeout_hours = timeout_hours
         self.timeout_half_life_factor = timeout_half_life_factor
         self.position_cap = position_cap
-        self.bars_per_hour = bars_per_hour
         self.strategy_tag = strategy_tag
         self.reestimate_window = reestimate_window
         self.reestimate_decay_ratio = reestimate_decay_ratio
@@ -145,9 +163,11 @@ class MeanReversionStrategy:
         #     timeout_bars = max(timeout_hours×1, 1.2×median_H)
         #     410 天 ETH/SOL 中位数 7-9bar → timeout ≈ 9-11bar，
         #     符合"持仓 3-9h 未回归即超时强平"本意。
+        # 持仓 bar 数直接按本周期的单 bar 毫秒数换算（由 interval 派生），
+        # 不再写死 3_600_000/1h；超时下界用物理小时 × bars_per_hour 折算。
         bars_held = 0
         if pos.state in ("LONG_SPREAD", "SHORT_SPREAD") and pos.entry_ts_ms > 0:
-            bars_held = int((ts_ms - pos.entry_ts_ms) / (3_600_000 / self.bars_per_hour))
+            bars_held = int((ts_ms - pos.entry_ts_ms) / self.bar_ms)
         # P2：用 sig 最近有效 half_life 中位数替代单 bar half_life
         hl_for_timeout = half_life
         if sig is not None and "half_life" in sig.columns:
@@ -273,7 +293,9 @@ class MeanReversionStrategy:
             limit_price=limit_price,
             strategy_tag=self.strategy_tag,
             confidence=confidence,
-            ttl_ms=3_600_000,
+            # 订单有效期 = 1 根 bar，随周期派生；旧值 3_600_000 写死 1h。
+            # ttl_ms 目前在 M5/M6/M8 主链路未被消费，故不改变任何回测结果。
+            ttl_ms=self.bar_ms,
             pair=("A", "B"),
             leg_a_qty=leg_a_qty,
             leg_b_qty=leg_b_qty,
