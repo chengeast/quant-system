@@ -180,10 +180,14 @@ def build_candidates(m: pd.DataFrame):
                       periodic_trades(m, R, pick)))
 
     # ---- S3 均值回归 + 固定长持有（延长持有期，看单笔毛利能否变厚）----
+    # ---- S3 均值回归 + 长持有：价差回归 0.5σ 或跨 0 才平仓（统计套利正确语义）
+    #      旧版误用 exit_rule=False 退化成固定持有期，毛利被摊薄，已修正（第八轮）
     trig_mr = np.where(z <= -3.0, 1, np.where(z >= 3.0, -1, 0))
     for h in (24, 72, 168):
-        cands.append(("S3_mean_rev_long_hold", f"3σ/H={h}",
-                      event_trades(m, trig_mr, lambda j, s: False, h)))
+        def _mr_exit(j, s, z=z, h=h):
+            return abs(z[j]) <= 0.5 or (j >= h and z[j] * z[j - 1] < 0)
+        cands.append(("S3_mean_rev_long_hold", f"3σ/H={h}/0.5σ退出",
+                      event_trades(m, trig_mr, _mr_exit, h)))
 
     # ---- S4 相对强弱通道突破：log(A/B) 突破过去 24bar 高低点 → 跟随 ----
     up = pd.Series(ratio).shift(1).rolling(24).max().to_numpy()
