@@ -1,9 +1,12 @@
-# M1 数据层依赖
+# 统计套利 MVP · 本地运行依赖（实测环境：Python 3.13）
+# 安装：python -m pip install -r requirements.txt
 pandas>=2.0
 numpy>=1.24
-pyarrow>=12.0
+pyarrow>=12.0        # data/cache/*.parquet 读写，缺它读不了 K 线缓存
+statsmodels>=0.14    # M2/M3 实际 import：adfuller（ADF / 协整检验）
+scipy>=1.10          # statsmodels 的传递依赖，显式锁定避免版本漂移
 
-# 阶段 4 后续模块会用到（按需补装）
-# scipy>=1.10        # ADF / Engle-Granger / Johansen 协整检验（M2/M3）
-# statsmodels>=0.14  # OLS 估 h（M3）
-# plotly             # 前端看板（M9）
+# 不需要的依赖（避免误装）：
+#   - 数据层用标准库 urllib + HMAC-SHA512 签名，不需要 requests
+#   - 看板是单文件原生 SVG/JS，不需要 plotly / 前端构建工具
+#   - 参数校验是纯标准库 SHA256，不需要 PyYAML
