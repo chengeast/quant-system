@@ -201,6 +201,9 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
     eq = res.equity_curve.dropna()
     data_start = pd.to_datetime(eq.index.min(), unit="s").strftime("%Y-%m-%d")
     data_end = pd.to_datetime(eq.index.max(), unit="s").strftime("%Y-%m-%d")
+    # 动态计算，避免报告里残留旧口径硬编码（成本模型修正后数值会变）
+    gross_sum = sum(float(t.get("pnl", 0.0)) for t in res.trades)
+    n_trades = len(res.trades)
 
     lines = [
         "# M8 回测报告 · ETH_USDT × SOL_USDT 统计套利 MVP",
@@ -224,8 +227,11 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
         "## 2. 成本可执行性（M8 验收 3）",
         "",
         f"- 滑点：4bp/边（M6 PaperBroker，在冻结 3–5bp 内）",
+        f"- 成本模型：taker 0.1% + 滑点 4bp = 0.14%/边，两腿各成交一次；"
+        "M8 已把滑点计入 cost_paid（第三轮辩论修正，旧版仅计 taker，低估 1.4×）",
         f"- 累计成本：${m.get('cost_paid', 0):.2f}",
-        f"- 每笔成本 ≤ 毛利 35%：{'✅' if m.get('cost_executable') else '❌'}",
+        f"- 累计成本 ≤ 累计毛利 35%（总口径，max_cost_as_pct_of_gross）："
+        f"{'✅' if m.get('cost_executable') else '❌'}",
         f"- 最长连亏：{m.get('max_consecutive_losses')} 笔（门槛 ≤5：{'✅' if m.get('max_consecutive_losses', 99) <= 5 else '❌'}）",
         "",
         "## 3. 极端段（2024-09 的窗口内等价替代）",
@@ -236,8 +242,8 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
         "**2026-02-04 ~ 02-10**（该段 7 日累计 −25.7%，其中 02-05 单日 −14.0%）。",
         "",
         f"- 该段内策略 PnL：{m['extreme_pnl']:+.4%}（{'✅ 不亏' if m.get('extreme_survived') else '❌ 亏损'}）",
-        f"- 说明：该段内净值未变动，源于 M8 暴露的工程缺陷（见 §4），"
-        "非策略在该段必然盈利；如实申报。",
+        f"- 说明：该段盈亏按 t+1 跨 bar 成交后的实际持仓逐 bar 记账；"
+        "若该段未持仓则 PnL=0，不代表策略在该段必然盈利；如实申报。",
         "",
         "## 4. M8 暴露的工程缺陷（中期会 A1–A8 触发项）",
         "",
@@ -245,11 +251,12 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
         "|---|------|------|------|",
         "| D8 | 未来函数 | 主循环 t 出信号 / t+1 成交 | ✅ 已落实 |",
         "| D9 | 年化口径 | 1h 用 √(365×24)，区别于 1min √(252×144) | ✅ 已注明 |",
-        "| M3-h | h 越界 INVALID 过多 | 410 天 524 bar（5.3%）h∉[0.5,2.0] → INVALID | 记 M9（h 越界是 phase2 红线，未擅改）|",
+        "| M3-h | h 越界 INVALID 过多 | 410 天约 5.3% bar h∉[0.5,2.0] → INVALID | ✅ 已修（P1 短窗重估 + 钳制 + DEGRADED 标记）|",
         "| M5-regime | regime 拒单率累计熔断 | 一次 INVALID 即 halt 全段 | ✅ 已修（regime 不计拒单率）|",
-        "| 样本 | 成交 230 笔（权益比例换算后） | 毛利 +$15 vs 成本 $240，成本不可执行 | 如实报告，不美化 |",
+        f"| 成本口径 | 旧 M8 只计 taker 0.1%，漏 M6 PaperBroker 滑点 4bp/边 | 真实成本 = 单腿名义市值 ×2×(taker+slip)，成本上修 1.4× | ✅ 已修（第三轮辩论 P4）|",
+        f"| 样本 | 成交 {n_trades} 笔 | 毛利合计 {gross_sum:+.2f} USD vs 成本 {res.cost_paid:.2f} USD，成本不可执行 | 如实报告，不美化 |",
         "| 仓位口径 | 旧币数 qty=10 拍死市值，ETH/SOL 行情放大→净值冲到 25001、M5 全拒 | 改权益比例 qty=base×5%×conf/单腿价（与 M5 max_single_exposure 对齐） | ✅ 已修（净值回 10000 可控带） |",
-        "| P&L 计算 | 旧 close_mval−open_mval 同 bar 抵消=0，逐笔 pnl 全 0 | 改 close 用 hold_start_mval 快照 vs close_mval | ✅ 已修（逐笔 pnl 非 0，合计 +$15） |",
+        f"| P&L 计算 | 旧 close_mval−open_mval 同 bar 抵消=0，逐笔 pnl 全 0 | 改平仓用 hold_start_mval 快照 vs close_mval | ✅ 已修（逐笔 pnl 非 0，合计 {gross_sum:+.2f}） |",
         "",
         "## 5. 门槛判定（backtest_gate 冻结）",
         "",

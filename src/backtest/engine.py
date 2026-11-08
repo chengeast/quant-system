@@ -104,6 +104,9 @@ class BacktestConfig:
     # 决策层
     stop_loss_sigma: float = 2.0
     timeout_hours: float = 3.0
+    # 超时倍数（P2 后用 sig 的 half_life 中位数作 H）：timeout=max(3h, factor×H)
+    # 暴露为可配置项，供第三轮专家辩论的参数扫描（phase5-p3-param-debate）
+    timeout_half_life_factor: float = 1.2
     # 仓位口径（统计套利正确定义，phase5-m8-defect-debate 修正）：
     # 单腿占账户权益的固定比例，与 M5 max_single_exposure 对齐。
     # qty = base_equity × leg_equity_pct × confidence / 单腿价
@@ -163,6 +166,7 @@ class Backtester:
             exit_sigma=cfg.exit_sigma,
             stop_loss_sigma=cfg.stop_loss_sigma,
             timeout_hours=cfg.timeout_hours,
+            timeout_half_life_factor=cfg.timeout_half_life_factor,
             position_cap=cfg.leg_equity_pct,   # 0.05 = 单腿 5% 权益（M8 换算用）
             bars_per_hour=cfg.bars_per_hour,
         )
@@ -301,7 +305,15 @@ class Backtester:
                         close_qty = abs(a_qt)
                     if close_qty > 0:
                         avg_px = (close_a + close_b) / 2.0
-                        cost_paid += close_qty * avg_px * self.cfg.taker_fee_pct * 2.0
+                        # 成本口径修正（第三轮辩论 P4 附带发现）：
+                        # 旧版 cost_paid 只算 taker_fee_pct，M6 PaperBroker 的滑点
+                        # 体现在 fill_price 上，而 M8 主循环直接用 close 价入账腿账本，
+                        # 既没进腿账本也没进 cost_paid → 回测系统性低估成本、高估净收益。
+                        # 修正：按名义市值把滑点以成本形式计入（等价于成交价不利偏移），
+                        # 两腿各一次 → ×2；taker 0.1% + 滑点 4bp = 0.14%/边。
+                        cost_rate = (self.cfg.taker_fee_pct
+                                     + self.cfg.slippage_bps / 10_000.0)
+                        cost_paid += close_qty * avg_px * cost_rate * 2.0
                     # t+1 成交后提交持仓快照
                     # 开仓单（buy/sell）→ 候选持仓（pending_pos 在 t 时刻已生成）
                     # 平仓单（close）→ 清空决策层快照（leg 已镜像平掉，本 bar 末 leg 归零）
@@ -375,8 +387,11 @@ class Backtester:
                 self._fill_leg(leg_b, "buy", b_qt, close_b_last)
             elif b_qt < 0:
                 self._fill_leg(leg_b, "sell", abs(b_qt), close_b_last)
-            fill = self.exec_mgr.submit(pending)
-            cost_paid += fill.fee * 2.0
+            self.exec_mgr.submit(pending)
+            # 边界强平：与主循环同口径（fill.fee 仅含 taker，滑点需按名义市值补计）
+            rate = self.cfg.taker_fee_pct + self.cfg.slippage_bps / 10_000.0
+            last_avg_px = (close_a_last + close_b_last) / 2.0
+            cost_paid += abs(a_qt) * last_avg_px * rate * 2.0
             equity_curve[-1] = self._equity_now(
                 base_equity, leg_a, leg_b, close_a_last, close_b_last, cost_paid)
 
@@ -585,11 +600,13 @@ def compute_performance(equity: pd.Series, rets: pd.Series,
                 cur = 0
         max_consec_losses = mx
 
-    # 成本可执行性：每笔成本 ≤ 毛利 35%
-    cost_ok = True
-    if gross_per_trade and n_trades and n_trades > 0:
-        avg_cost_per_trade = cost_paid / n_trades
-        cost_ok = avg_cost_per_trade <= 0.35 * gross_per_trade
+    # 成本可执行性：累计成本 ≤ 累计毛利 35%（总口径）
+    # 旧版用「平均盈利笔毛利 vs 平均每笔成本」，且 gross_per_trade 为 None 时
+    # 默认 True → 出现「净收益为负却判成本可执行 ✅」的自相矛盾；
+    # 且「少数大盈 + 多数小亏」会被平均口径误判为可执行。
+    # 改为总口径，与 config/strategy_params.yaml 的 max_cost_as_pct_of_gross 对齐。
+    gross_total = sum(float(t.get("pnl", 0.0)) for t in (trades or []))
+    cost_ok = (gross_total > 0) and (cost_paid <= 0.35 * gross_total)
 
     m.update({
         "total_return": total_return,

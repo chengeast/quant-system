@@ -175,11 +175,15 @@ class MeanReversionStrategy:
 
         # ============ LONG_SPREAD（价差多头，买A卖B）============
         if pos.state == "LONG_SPREAD":
+            # P4 逻辑修复（第三轮辩论）：止损用「相对开仓点再偏离 stop_loss_sigma」，
+            # 旧版用绝对 -2σ，而进场是 -3σ → 开仓瞬间即满足止损 → 96% 平仓是
+            # stop_loss、持仓活不到价差回归，reg_rate 与真实 pnl 完全脱钩。
+            stop_z = self._stop_loss_z(pos, "LONG_SPREAD")
             # 仓位上限红线：z 比开仓点更深（加仓区）→ 拦截新开仓
             # 加仓区定义：z < entry_zscore（价差比开仓时偏离更深）
             # 此区间只放行止损/超时/回归离场，不允许加仓
             if self._would_add_position(pos, z):
-                if z <= -self.stop_loss_sigma:
+                if z <= stop_z:
                     return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                              pos_state="FLAT", reason="stop_loss")
                 if bars_held >= timeout_bars:
@@ -189,8 +193,8 @@ class MeanReversionStrategy:
                     return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                              pos_state="FLAT", reason="exit")
                 return None  # 加仓区且未达止损/超时/回归：拦截
-            # 止损：价差深套（z 向 -2σ 继续跌）→ 止损离场
-            if z <= -self.stop_loss_sigma:
+            # 止损：价差相对开仓点继续偏离 2σ → 止损离场
+            if z <= stop_z:
                 return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                          pos_state="FLAT", reason="stop_loss")
             # 超时：强制离场
@@ -205,9 +209,10 @@ class MeanReversionStrategy:
 
         # ============ SHORT_SPREAD（价差空头，卖A买B）============
         if pos.state == "SHORT_SPREAD":
+            stop_z = self._stop_loss_z(pos, "SHORT_SPREAD")
             # 仓位上限红线：z 比开仓点更深（加仓区）→ 拦截新开仓
             if self._would_add_position(pos, z):
-                if z >= self.stop_loss_sigma:
+                if z >= stop_z:
                     return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                              pos_state="FLAT", reason="stop_loss")
                 if bars_held >= timeout_bars:
@@ -217,8 +222,8 @@ class MeanReversionStrategy:
                     return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                              pos_state="FLAT", reason="exit")
                 return None  # 加仓区且未达止损/超时/回归：拦截
-            # 止损：价差反向涨到 +2σ
-            if z >= self.stop_loss_sigma:
+            # 止损：价差相对开仓点继续偏离 2σ
+            if z >= stop_z:
                 return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                          pos_state="FLAT", reason="stop_loss")
             # 超时
@@ -274,6 +279,24 @@ class MeanReversionStrategy:
             leg_b_qty=leg_b_qty,
             reason=reason,
         )
+
+    def _stop_loss_z(self, pos: PositionSnapshot, state: str) -> float:
+        """止损触发 z：相对开仓点朝不利方向再偏离 stop_loss_sigma（冻结值 2σ）。
+
+        config/strategy_params.yaml 的 `stop_loss_sigma: 2.0` 注释为「单腿 2σ 硬止损」，
+        语义是「开仓后价差再逆向走 2σ 就砍」，不是「z 到达绝对 ±2σ 就砍」。
+        旧实现用绝对阈值，而进场是 ±3σ → 开仓瞬间即满足止损条件：
+        M8 实测 264/275（96%）平仓为 stop_loss、仅 9 次 exit / 2 次 timeout，
+        持仓活不到价差回归，信号层 reg_rate 与真实 pnl 完全脱钩，
+        调超时 / 调进场 σ / 换币对 / 升尺度全部无效（第三轮辩论 P4 定位）。
+        """
+        if pos.entry_zscore == 0.0:
+            # 无开仓 z（异常兜底）：退回绝对口径，不应在正常运行中发生
+            return (-self.stop_loss_sigma if state == "LONG_SPREAD"
+                    else self.stop_loss_sigma)
+        return (pos.entry_zscore - self.stop_loss_sigma
+                if state == "LONG_SPREAD"
+                else pos.entry_zscore + self.stop_loss_sigma)
 
     def _would_add_position(self, pos: PositionSnapshot, z: float) -> bool:
         """判断当前是否"加仓"（持仓态 + 价差比开仓点更深偏离）。

@@ -10,11 +10,16 @@
   3. 无仓位超上限的订单意图产生
   4. re-estimation 钩子可触发（phase4 §9.2）
 
-统计套利语义说明：
-  LONG_SPREAD = 价差多头（买 A 卖 B，z 入仓 z≤-3σ），止损 z≤-2σ（价差深套）
-  SHORT_SPREAD = 价差空头（卖 A 买 B，z 入仓 z≥+3σ），止损 z≥+2σ（价差反向涨）
-  离场：|z|≤0.5σ 正常回归；超时 max(3h,1.2H)
-  加仓拦截：持仓态 + z 进一步朝持仓方向偏离（超 3σ）→ 不新开仓
+统计套利语义说明（第三轮辩论 P4 修正）：
+  LONG_SPREAD = 价差多头（买 A 卖 B，z 入仓 z≤-3σ）
+  SHORT_SPREAD = 价差空头（卖 A 买 B，z 入仓 z≥+3σ）
+  止损：**相对开仓点**再逆向偏离 stop_loss_sigma(2σ)，即
+        LONG 止损 z ≤ entry_z - 2σ（例 entry_z=-3 → -5）；
+        SHORT 止损 z ≥ entry_z + 2σ（例 entry_z=+3 → +5）。
+  旧验收把止损写成绝对 ±2σ，与 ±3σ 进场冲突 → 开仓瞬间即止损，
+  导致 M8 中 96% 平仓是 stop_loss、持仓活不到回归。验收 5 为防复发回归测试。
+  离场：|z|≤0.5σ 正常回归；超时 max(3h, 1.2×median_H)
+  加仓拦截：持仓态 + z 进一步朝持仓方向偏离 → 不新开仓
 """
 
 import sys
@@ -87,18 +92,28 @@ def check_threshold_boundary(sig: pd.DataFrame) -> bool:
     print(f"  [C] LONG + z=0.0 → side={intent_c.side if intent_c else None} "
           f"{'✅' if ok_c else '❌'}")
 
-    # [D] LONG_SPREAD + z=-2.0（价差深套，反向 2σ 止损）→ 止损离场
-    #   LONG 是价差多头（z 入仓 z≤-3σ），价差向 -2σ 继续跌 = 止损
+    # [D] LONG_SPREAD(entry_z=-3) + z=-2.0（向 0 回归途中）→ 继续持仓
+    #   P4：止损是相对开仓点再逆向 2σ = -5，不是绝对 -2
     d = sig.tail(1).copy()
     d["zscore"] = [-2.0]
     d["state"] = ["OK"]
     intent_d = strat.decide(d, pos_long, ts_ms=1_000_000)
-    ok_d = (intent_d is not None) and (intent_d.reason == "stop_loss")
+    ok_d = (intent_d is None)
     ok &= ok_d
-    print(f"  [D] LONG + z=-2.0(止损) → reason={intent_d.reason if intent_d else None} "
+    print(f"  [D] LONG + z=-2.0(未到相对止损-5) → 继续持仓: "
           f"{'✅' if ok_d else '❌'}")
 
-    # [E] SHORT_SPREAD + z=+2.0（价差反向涨到 +2σ 止损）→ 止损离场
+    # [D2] LONG_SPREAD + z=-5.5（比开仓 -3 再逆向 2.5σ）→ 止损离场
+    d2 = sig.tail(1).copy()
+    d2["zscore"] = [-5.5]
+    d2["state"] = ["OK"]
+    intent_d2 = strat.decide(d2, pos_long, ts_ms=1_000_000)
+    ok_d2 = (intent_d2 is not None) and (intent_d2.reason == "stop_loss")
+    ok &= ok_d2
+    print(f"  [D2] LONG + z=-5.5(相对止损-5) → reason="
+          f"{intent_d2.reason if intent_d2 else None} {'✅' if ok_d2 else '❌'}")
+
+    # [E] SHORT_SPREAD(entry_z=+3) + z=+2.0（向 0 回归途中）→ 继续持仓
     pos_short = PositionSnapshot(state="SHORT_SPREAD", entry_ts_ms=0,
                                  entry_zscore=3.0, position_qty=5.0,
                                  leg_a_qty=-5.0, leg_b_qty=5.0)
@@ -106,10 +121,20 @@ def check_threshold_boundary(sig: pd.DataFrame) -> bool:
     e["zscore"] = [2.0]
     e["state"] = ["OK"]
     intent_e = strat.decide(e, pos_short, ts_ms=1_000_000)
-    ok_e = (intent_e is not None) and (intent_e.reason == "stop_loss")
+    ok_e = (intent_e is None)
     ok &= ok_e
-    print(f"  [E] SHORT + z=+2.0(止损) → reason={intent_e.reason if intent_e else None} "
+    print(f"  [E] SHORT + z=+2.0(未到相对止损+5) → 继续持仓: "
           f"{'✅' if ok_e else '❌'}")
+
+    # [E2] SHORT_SPREAD + z=+5.5（比开仓 +3 再逆向 2.5σ）→ 止损离场
+    e2 = sig.tail(1).copy()
+    e2["zscore"] = [5.5]
+    e2["state"] = ["OK"]
+    intent_e2 = strat.decide(e2, pos_short, ts_ms=1_000_000)
+    ok_e2 = (intent_e2 is not None) and (intent_e2.reason == "stop_loss")
+    ok &= ok_e2
+    print(f"  [E2] SHORT + z=+5.5(相对止损+5) → reason="
+          f"{intent_e2.reason if intent_e2 else None} {'✅' if ok_e2 else '❌'}")
 
     # [F] 超时强平：持仓 bar 数超过 max(3h, 1.2×400=480bar)
     # 注意：用 tail(1) 避免 _should_reestimate 在长序列上误触发
@@ -167,17 +192,17 @@ def check_position_cap(sig: pd.DataFrame) -> bool:
 
     # 仓位达上限 + z 比开仓点更深（加仓方向）的验证：
     # 语义：加仓被拦截（不产生"加仓开新仓"订单），但止损/超时/回归离场仍允许
-    # 用 z=-3.5（比开仓点 -3.0 更深）→ 在止损区（z≤-2σ）→ 止损离场允许
-    # 用 z=-3.0（等于开仓点，不更深）→ _would_add_position=False → 正常
+    # P4 后：z=-3.5 比开仓 -3.0 更深 → 加仓区，但相对止损是 -5.0（未到）
+    # → 不新开仓、不止损 → 拦截（None）。这是「开仓后不应立即被砍」的核心断言。
     pos_over = PositionSnapshot(state="LONG_SPREAD", position_qty=cap,
                                 entry_zscore=-3.0, leg_a_qty=cap, leg_b_qty=-cap)
-    # 用例 b1：z 比开仓点更深（-3.5）→ 止损离场（允许，非加仓）
+    # 用例 b1：z=-3.5（加仓区但未到相对止损）→ 拦截加仓
     b1 = sig.tail(1).copy()
     b1["zscore"] = [-3.5]
     b1["state"] = ["OK"]
     intent_b1 = strat.decide(b1, pos_over, ts_ms=1_000_000)
-    ok_b1 = (intent_b1 is not None) and (intent_b1.reason == "stop_loss")
-    print(f"  [b1] LONG 仓位cap + z=-3.5(比开仓点深,止损区) → reason={intent_b1.reason if intent_b1 else None} "
+    ok_b1 = (intent_b1 is None)
+    print(f"  [b1] LONG 仓位cap + z=-3.5(加仓区,未到相对止损-5) → 拦截: "
           f"{'✅' if ok_b1 else '❌'}")
 
     # 用例 b2：z=-1.0 比开仓点-3.0浅(非加仓区)，未到止损/回归/超时 → 正常持仓(None)
@@ -190,7 +215,7 @@ def check_position_cap(sig: pd.DataFrame) -> bool:
           f"{'✅' if ok_b2 else '❌'}")
 
     # 用例 b3：加仓拦截——仓位达cap + z 比开仓点更深 且 未到止损/超时/回归
-    # entry_z=-1.0, 现 z=-1.8(比-1.0深，未到止损-2.0) → 加仓区且未止损 → 拦截(None)
+    # entry_z=-1.0, 现 z=-1.8(比-1.0深，未到相对止损-3.0) → 加仓区且未止损 → 拦截(None)
     pos_deep = PositionSnapshot(state="LONG_SPREAD", position_qty=cap,
                                 entry_zscore=-1.0, leg_a_qty=cap, leg_b_qty=-cap)
     b3 = sig.tail(1).copy()
@@ -201,6 +226,56 @@ def check_position_cap(sig: pd.DataFrame) -> bool:
     print(f"  [b3] LONG 仓位cap + entry_z=-1.0 + z=-1.8(加仓区,未止损) → 拦截: "
           f"{'✅' if ok_b3 else '❌'}")
     return ok_a and ok_b1 and ok_b2 and ok_b3
+
+
+def check_stop_loss_relative(sig: pd.DataFrame) -> bool:
+    """验收 5（P4 防复发）：止损是相对开仓点的不利偏离，不是绝对 ±2σ。
+
+    回归背景：旧实现用绝对 ±2σ，进场却是 ±3σ → 开仓瞬间即满足止损，
+    M8 实测 264/275（96%）平仓为 stop_loss，持仓活不到价差回归，
+    信号层 reg_rate 与真实 pnl 完全脱钩。此用例防止该缺陷复发。
+    """
+    strat = MeanReversionStrategy()
+    ok = True
+    pos_long = PositionSnapshot(state="LONG_SPREAD", entry_ts_ms=0,
+                                entry_zscore=-3.2, position_qty=5.0,
+                                leg_a_qty=5.0, leg_b_qty=-5.0)
+    pos_short = PositionSnapshot(state="SHORT_SPREAD", entry_ts_ms=0,
+                                 entry_zscore=3.2, position_qty=5.0,
+                                 leg_a_qty=-5.0, leg_b_qty=5.0)
+
+    zl = strat._stop_loss_z(pos_long, "LONG_SPREAD")
+    zs = strat._stop_loss_z(pos_short, "SHORT_SPREAD")
+    ok_a = abs(zl - (-5.2)) < 1e-9 and abs(zs - 5.2) < 1e-9
+    ok &= ok_a
+    print(f"  [a] 相对止损阈值 LONG={zl:.2f} / SHORT=+{zs:.2f}: "
+          f"{'✅' if ok_a else '❌'}")
+
+    def decide_z(pos, z):
+        s = sig.tail(1).copy()
+        s["zscore"] = [z]
+        s["state"] = ["OK"]
+        return strat.decide(s, pos, ts_ms=1_000_000)
+
+    # 开仓后紧接一根 bar（略深但远未到相对止损）→ 不得被立即止损
+    i1, i2 = decide_z(pos_long, -3.3), decide_z(pos_short, 3.3)
+    ok_b = (i1 is None) and (i2 is None)
+    ok &= ok_b
+    print(f"  [b] 开仓后下一 bar 不被立即止损: {'✅' if ok_b else '❌'} "
+          f"(LONG={i1.reason if i1 else None}, SHORT={i2.reason if i2 else None})")
+
+    i3, i4 = decide_z(pos_long, -5.4), decide_z(pos_short, 5.4)
+    ok_c = (i3 is not None and i3.reason == "stop_loss"
+            and i4 is not None and i4.reason == "stop_loss")
+    ok &= ok_c
+    print(f"  [c] 越过相对止损才触发 stop_loss: {'✅' if ok_c else '❌'}")
+
+    i5, i6 = decide_z(pos_long, 0.3), decide_z(pos_short, -0.3)
+    ok_d = (i5 is not None and i5.reason == "exit"
+            and i6 is not None and i6.reason == "exit")
+    ok &= ok_d
+    print(f"  [d] 回归到 0.5σ 带内正常离场 exit: {'✅' if ok_d else '❌'}")
+    return ok
 
 
 def check_reevaluation_hook(sig: pd.DataFrame) -> bool:
@@ -253,6 +328,9 @@ def main():
 
     print("\n[验收 4] re-estimation 钩子（phase4 §9.2）")
     ok &= check_reevaluation_hook(sig)
+
+    print("\n[验收 5] P4 防复发：止损为相对开仓点口径（非绝对 ±2σ）")
+    ok &= check_stop_loss_relative(sig)
 
     print("\n" + "=" * 70)
     print("M4 验收结论:", "✅ 通过" if ok else "❌ 未通过")
