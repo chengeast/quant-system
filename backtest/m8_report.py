@@ -148,7 +148,14 @@ def main() -> int:
     print("     → 持仓态下 M4 invalid_signal_exit 反复强平损耗")
     print("     （h 越界即 INVALID 是 phase2 冻结红线，未擅改；记 M9 优化项）")
     print("  M5 regime 拒单：regime INVALID 不计入拒单率统计（已修，避免熔断整段）")
-    print("  样本薄：410 天仅 8 笔平仓，统计意义有限（M8 如实报告，不美化）")
+    n_trades = m.get("n_trades", 0)
+    if n_trades > 0:
+        print(f"  成本可执行性：成交 {n_trades} 笔，成本 {res.cost_paid:.2f} USD")
+        gross_per_trade = m.get("gross_per_trade")
+        if gross_per_trade is not None:
+            print(f"     每笔毛利 ${gross_per_trade:.2f} vs 单笔成本 "
+                  f"${res.cost_paid / max(1, n_trades):.2f}")
+        print(f"     成本 ≤ 毛利 35% 判定: {m.get('cost_executable', False)}")
 
     # ---- golden value 快照 ----
     snapshot = {
@@ -239,7 +246,9 @@ def _render_report(res, m: dict, g: dict, snapshot: dict) -> str:
         "| D9 | 年化口径 | 1h 用 √(365×24)，区别于 1min √(252×144) | ✅ 已注明 |",
         "| M3-h | h 越界 INVALID 过多 | 410 天 524 bar（5.3%）h∉[0.5,2.0] → INVALID | 记 M9（h 越界是 phase2 红线，未擅改）|",
         "| M5-regime | regime 拒单率累计熔断 | 一次 INVALID 即 halt 全段 | ✅ 已修（regime 不计拒单率）|",
-        "| 样本 | 平仓仅 8 笔 | 统计意义有限 | 如实报告，不美化 |",
+        "| 样本 | 成交 230 笔（权益比例换算后） | 毛利 +$15 vs 成本 $240，成本不可执行 | 如实报告，不美化 |",
+        "| 仓位口径 | 旧币数 qty=10 拍死市值，ETH/SOL 行情放大→净值冲到 25001、M5 全拒 | 改权益比例 qty=base×5%×conf/单腿价（与 M5 max_single_exposure 对齐） | ✅ 已修（净值回 10000 可控带） |",
+        "| P&L 计算 | 旧 close_mval−open_mval 同 bar 抵消=0，逐笔 pnl 全 0 | 改 close 用 hold_start_mval 快照 vs close_mval | ✅ 已修（逐笔 pnl 非 0，合计 +$15） |",
         "",
         "## 5. 门槛判定（backtest_gate 冻结）",
         "",

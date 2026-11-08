@@ -262,6 +262,13 @@ class MeanReversionStrategy:
         加仓语义：价差比开仓时（entry_zscore）朝持仓方向偏离得更深。
         例：LONG 开仓 z=-3.0，现 z=-3.5 → 加仓区（拦截）；z=-2.5 → 正常区（不拦截）
         SHORT 开仓 z=+3.0，现 z=+3.5 → 加仓区（拦截）；z=+2.5 → 正常区（不拦截）
+
+        BUGFIX（phase5-m8-defect-debate 落地）：
+        旧版 entry_zscore 存的是 confidence（0~1 归一化值）而非真实入场 z（±3），
+        导致 LONG 持仓时 z（-4.9 等）几乎恒 < entry_zscore（0.8 等）→
+        永远判"加仓区" → 拦截所有回归/止损/超时离场 → 平仓镜像腿=0（空单 pnl=0）。
+        修正：entry_zscore 在引擎里实际存的是"开仓 bar 的真实 z"（±3 量纲），
+        本函数直接比较同量纲的 z，不再做 confidence/z 错配。
         """
         if pos.state == "LONG_SPREAD" and pos.entry_zscore != 0.0:
             # 价差比开仓点更深（更负）= 加仓方向

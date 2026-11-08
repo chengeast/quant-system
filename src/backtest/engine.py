@@ -104,7 +104,11 @@ class BacktestConfig:
     # 决策层
     stop_loss_sigma: float = 2.0
     timeout_hours: float = 3.0
-    position_cap: float = 10.0
+    # 仓位口径（统计套利正确定义，phase5-m8-defect-debate 修正）：
+    # 单腿占账户权益的固定比例，与 M5 max_single_exposure 对齐。
+    # qty = base_equity × leg_equity_pct × confidence / 单腿价
+    # 旧 position_cap=10.0（币数）拍死市值，随价格漂移导致 M5 全拒/净值异常。
+    leg_equity_pct: float = 0.05
     bars_per_hour: int = 1
 
     # 风控层
@@ -152,12 +156,14 @@ class Backtester:
             exit_sigma=cfg.exit_sigma,
             hl_range=cfg.hl_range,      # A3 裁决
         )
+        # 仓位口径：单腿占权益比例（与 M5 max_single_exposure 对齐），
+        # 不是币数。M4 仍按币数产 intent，M8 在 submit 前换算成权益比例。
         self.strat = MeanReversionStrategy(
             entry_sigma=cfg.entry_sigma,
             exit_sigma=cfg.exit_sigma,
             stop_loss_sigma=cfg.stop_loss_sigma,
             timeout_hours=cfg.timeout_hours,
-            position_cap=cfg.position_cap,
+            position_cap=cfg.leg_equity_pct,   # 0.05 = 单腿 5% 权益（M8 换算用）
             bars_per_hour=cfg.bars_per_hour,
         )
         self.risk_policy = CryptoRiskPolicy(RiskGate(
@@ -233,6 +239,8 @@ class Backtester:
         pos = PositionSnapshot(state="FLAT")
         pending: Optional[OrderIntent] = None
         pending_z: float = 0.0
+        pending_pos: Optional[PositionSnapshot] = None  # 开/平仓候选（t+1 PASS 才提交）
+        hold_start_mval = 0.0   # 开仓成交时的两腿市值快照（用于平仓 P&L 计算）
 
         for i in range(n):
             ts_ms = int(sig["ts_ms"].iloc[i])
@@ -247,8 +255,8 @@ class Backtester:
             # （防未来函数：t 出信号、t+1 成交，t+1 的 regime 已知）
             if pending is not None:
                 verdict = self.risk_policy.gate(
-                    pending, self._to_position(pos, base_equity,
-                                               self._exposure(leg_a, leg_b)),
+                    pending,
+                    self._to_position(pos, close_a, close_b),
                     self._equity_now(base_equity, leg_a, leg_b, close_a, close_b,
                                      cost_paid),
                     RegimeStatus.OK if state == "OK" else RegimeStatus.INVALID,
@@ -257,7 +265,8 @@ class Backtester:
                     # 成交前腿 realized（用于算本笔平仓实现的毛盈亏）
                     open_mval = leg_a.value(close_a) + leg_b.value(close_b)
                     mirror_a, mirror_b = self._current_leg_qtys(leg_a, leg_b)
-                    a_qt, b_qt = self._effective_leg_qtys(pending, leg_a, leg_b)
+                    a_qt, b_qt = self._effective_leg_qtys(
+                        pending, leg_a, leg_b, close_a, close_b)
                     if a_qt > 0:
                         self._fill_leg(leg_a, "buy", a_qt, close_a)
                     elif a_qt < 0:
@@ -266,45 +275,86 @@ class Backtester:
                         self._fill_leg(leg_b, "buy", b_qt, close_b)
                     elif b_qt < 0:
                         self._fill_leg(leg_b, "sell", abs(b_qt), close_b)
+                    # P&L 计算：
+                    #   开仓单（buy/sell）→ 0（开仓只建腿账本，不产生平仓毛盈亏）
+                    #   平仓单（close/...）→ 成交后两腿市值 − 开仓时两腿市值快照
+                    # 旧 bug：所有单都用 close_mval−open_mval（=0，因两腿刚被平/刚开
+                    # 在同一 bar 同时入账），逐笔 pnl 全 0。
+                    # hold_start_mval：开仓成交 bar 的两腿市值（首次开仓 / 加仓不更新）
                     close_mval = leg_a.value(close_a) + leg_b.value(close_b)
-                    trade_pnl = close_mval - open_mval
-                    # M6 模拟成交：成交标的量 = 开仓用 intent.qty，平仓用镜像量
-                    # 两腿各承担一次手续费 → 成本 = 单次 fee × 2
                     if pending.side == "close":
-                        close_qty = abs(mirror_a)
+                        trade_pnl = close_mval - hold_start_mval
                         trades.append(self._trade_record(
                             pending, ts_ms, pending_z, pnl=trade_pnl))
+                        hold_start_mval = 0.0   # 已平仓，清快照
                     else:
-                        close_qty = pending.qty
+                        trade_pnl = 0.0
+                        if hold_start_mval == 0.0:
+                            hold_start_mval = close_mval
+                    # M6 模拟成交：成交标的量 = 开仓用换算后的权益比例 qty，平仓用镜像量
+                    # 两腿各承担一次手续费 → 成本 = 单腿 fee × 2
+                    if pending.side == "close":
+                        close_qty = abs(mirror_a)
+                    else:
+                        close_qty = abs(a_qt)
                     if close_qty > 0:
                         avg_px = (close_a + close_b) / 2.0
                         cost_paid += close_qty * avg_px * self.cfg.taker_fee_pct * 2.0
+                    # t+1 成交后提交持仓快照
+                    # 开仓单（buy/sell）→ 候选持仓（pending_pos 在 t 时刻已生成）
+                    # 平仓单（close）→ 清空决策层快照（leg 已镜像平掉，本 bar 末 leg 归零）
+                    if pending_pos is not None:
+                        pos = pending_pos
+                    elif pending.side in ("buy", "sell"):
+                        # 兜底：若 t 时刻候选未生成（如收尾强平），按 pending 重建持仓快照
+                        pos = PositionSnapshot(
+                            state=("LONG_SPREAD" if pending.symbol == "long_spread"
+                                   else "SHORT_SPREAD"),
+                            entry_ts_ms=ts_ms,
+                            entry_zscore=pending_z,
+                            position_qty=pending.qty,
+                            leg_a_qty=pending.leg_a_qty,
+                            leg_b_qty=pending.leg_b_qty,
+                        )
                     pending = None
-                # REJECT / HALT：不成交，仅 M7 记拒单（不阻塞核心）
-                self.hub.on_reject(
-                    ts_ms, self.risk_policy.risk_gate.get_reject_rate(),
-                    reason="gate", category="reconcile_pending")
-                pending = None
+                    pending_pos = None
+                else:
+                    # REJECT / HALT：不成交，仅 M7 记拒单（不阻塞核心）
+                    # 撤销候选持仓快照（pos 保持原态，腿账本未入账）
+                    self.hub.on_reject(
+                        ts_ms, self.risk_policy.risk_gate.get_reject_rate(),
+                        reason="gate", category="reconcile_pending")
+                    pending = None
+                    pending_pos = None
 
-            # ===== 本 bar：M4 决策（基于 t 时刻信号）→ 产生 pending（t+1 撮合）=====
+            # ===== 本 bar：M4 决策（基于 t 时刻信号）→ 暂存 pending 候选（t+1 才撮合）=====
+            # 时序修复：bar t 只产生候选 intent + 候选持仓快照，不立即提交 pos；
+            # 待 t+1 PASS 成交后才真正提交 pos（与腿账本同步），
+            # 否则拒单时 pos 已持仓但腿为空 → 平仓镜像量=0（空单损耗）。
             intent = self.strat.decide(sig.iloc[:i + 1].tail(60), pos, ts_ms=ts_ms)
             if intent is not None:
                 pending = intent
                 pending_z = 0.0 if pd.isna(z) else float(z)
                 if intent.side in ("buy", "sell") and intent.qty > 0:
-                    pos = PositionSnapshot(
+                    # 开仓候选：同步换算到权益比例 qty（与 t+1 PASS 成交入账口径一致）
+                    scaled_a, scaled_b = self._scale_entry_leg_qtys(
+                        intent, base_equity=self.cfg.base_equity,
+                        leg_equity_pct=self.cfg.leg_equity_pct,
+                        close_a=close_a, close_b=close_b,
+                    )
+                    pending_pos = PositionSnapshot(
                         state=("LONG_SPREAD" if intent.symbol == "long_spread"
                                else "SHORT_SPREAD"),
                         entry_ts_ms=ts_ms,
                         entry_zscore=pending_z,
-                        position_qty=intent.qty,
-                        leg_a_qty=intent.leg_a_qty,
-                        leg_b_qty=intent.leg_b_qty,
+                        position_qty=abs(scaled_a),
+                        leg_a_qty=scaled_a,
+                        leg_b_qty=scaled_b,
                     )
                 else:
-                    # 平仓：清空决策层快照（下一 bar 撮合后生效）
-                    pos = PositionSnapshot(state="FLAT", entry_ts_ms=ts_ms,
-                                           entry_zscore=pending_z)
+                    # 平仓候选：清空持仓（t+1 成交后提交）
+                    pending_pos = PositionSnapshot(state="FLAT", entry_ts_ms=ts_ms,
+                                                   entry_zscore=pending_z)
 
             equity_curve[i] = self._equity_now(base_equity, leg_a, leg_b,
                                                 close_a, close_b, cost_paid)
@@ -313,7 +363,8 @@ class Backtester:
         if pending is not None:
             close_a_last = float(sig["close_a"].iloc[-1])
             close_b_last = float(sig["close_b"].iloc[-1])
-            a_qt, b_qt = self._effective_leg_qtys(pending, leg_a, leg_b)
+            a_qt, b_qt = self._effective_leg_qtys(
+                pending, leg_a, leg_b, close_a_last, close_b_last)
             if a_qt > 0:
                 self._fill_leg(leg_a, "buy", a_qt, close_a_last)
             elif a_qt < 0:
@@ -337,36 +388,73 @@ class Backtester:
         leg.apply(side, qty, price)
 
     def _effective_leg_qtys(self, pending: OrderIntent,
-                             leg_a: LegAccount, leg_b: LegAccount
+                             leg_a: LegAccount, leg_b: LegAccount,
+                             close_a: float, close_b: float
                              ) -> tuple:
-        """平仓时 M4 的 close intent 带 leg_qty=0（由调用方按持仓决定），
-        故引擎需镜像当前两腿净持仓：开仓 qty=±cap，平仓取当前实际净持仓反向。"""
+        """开/平仓时实际入账的两腿 qty。
+
+        开仓（buy/sell）：把 M4 产出的"币数 qty"（position_cap×confidence）
+        换算成权益比例口径 qty = base_equity × leg_equity_pct × confidence / 单腿价。
+        旧币数口径在 410 天 ETH/SOL 行情下被价格放大 → 净值冲到 25001、M5 全拒。
+        权益比例口径与 M5 max_single_exposure(0.05) 对齐：单腿市值 ≈ 5% 权益。
+
+        平仓（close/stop_loss/timeout/...）：镜像当前两腿净持仓反向平掉
+        （开仓已按权益比例入账，平仓镜像自动一致，无需再换算）。
+        """
         if pending.side in ("buy", "sell"):
-            # 开仓：用 intent 自带的 leg_qty
-            return pending.leg_a_qty, pending.leg_b_qty
-        # 平仓（close / stop_loss / timeout / exit / invalid_signal_exit）：
-        # 镜像当前净持仓反向平掉
+            return self._scale_entry_leg_qtys(
+                pending, base_equity=self.cfg.base_equity,
+                leg_equity_pct=self.cfg.leg_equity_pct,
+                close_a=close_a, close_b=close_b,
+            )
+        # 平仓：镜像当前净持仓反向平掉
         return -leg_a.qty, -leg_b.qty
+
+    def _scale_entry_leg_qtys(self, pending: OrderIntent, base_equity: float,
+                               leg_equity_pct: float, close_a: float,
+                               close_b: float) -> tuple:
+        """权益比例换算：把 M4 币数 qty 按单腿价格折成 base_equity×pct 的市值币数。
+
+        市值中性配对仓：腿 A 市值 = 腿 B 市值 = base_equity × leg_equity_pct × confidence
+        qty_a = 单腿市值 / close_a（方向由 pending 决定：LONG=+A−B，SHORT=−A+B）
+        """
+        if pending.leg_a_qty == 0.0 and pending.leg_b_qty == 0.0:
+            return 0.0, 0.0
+        conf = max(pending.confidence, 0.0)
+        single_leg_value = base_equity * leg_equity_pct * conf
+        if close_a <= 0 or close_b <= 0:
+            return 0.0, 0.0
+        qa = single_leg_value / close_a
+        qb = single_leg_value / close_b
+        # 保持 M4 的方向约定：LONG(leg_a_qty>0)=+A −B；SHORT(leg_a_qty<0)=−A +B
+        if pending.leg_a_qty >= 0:
+            return qa, -qb
+        else:
+            return -qa, qb
 
     def _current_leg_qtys(self, leg_a: LegAccount, leg_b: LegAccount) -> tuple:
         """成交前的两腿净持仓镜像量（平仓标的量 = |镜像量|）。"""
         return (-leg_a.qty, -leg_b.qty) if (leg_a.qty or leg_b.qty) else (0.0, 0.0)
 
-    def _to_position(self, pos: PositionSnapshot, base_equity: float,
-                     exposure: float) -> Position:
-        """M5 风控的 Position 参数。统计套利配对仓是市值中性的：
-        两腿同时持有（A +q / B −q），净敞口≈0，故 qty 传 0（中性），
-        avg_cost 用单腿均价作参考（供敞口/权益骤降判断）。
-        M5 的敞口门槛改读 OrderIntent 的 leg 净敞口口径。"""
+    def _to_position(self, pos: PositionSnapshot, close_a: float, close_b: float) -> Position:
+        """M5 风控的 Position 参数。市值中性配对仓（A +m / B −m，m≈单腿市值）：
+        净敞口≈0，qty 传 0（中性）；avg_cost 用成交 bar 单腿均价作参考。
+        M5 敞口门槛改读 OrderIntent 的腿市值口径（见 _exposure/_equity_pct_exposure）。"""
+        avg_leg_px = (close_a + close_b) / 2.0
         return Position(
             ts_ms=pos.entry_ts_ms, symbol="spread",
-            qty=0.0,   # 中性配对仓：净 qty = 0（腿 A 与腿 B 抵消）
-            avg_cost=exposure / max(1.0, exposure) if exposure else 0.0,
+            qty=0.0,
+            avg_cost=avg_leg_px,
         )
 
-    def _exposure(self, leg_a: LegAccount,
-                  leg_b: LegAccount) -> float:
-        return abs(leg_a.qty) + abs(leg_b.qty)
+    def _equity_pct_exposure(self, leg_a: LegAccount, leg_b: LegAccount,
+                              close_a: float, close_b: float,
+                              base_equity: float) -> float:
+        """市值口径：单腿市值占权益比例（与 M5 max_single_exposure 对齐）。
+        统计套利单腿市值 ≈ base_equity × leg_equity_pct（约 5%）。"""
+        if base_equity <= 0:
+            return 0.0
+        return max(abs(leg_a.value(close_a)), abs(leg_b.value(close_b))) / base_equity
 
     def _equity_now(self, base_equity: float, leg_a: LegAccount,
                     leg_b: LegAccount, close_a: float,

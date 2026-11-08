@@ -163,10 +163,14 @@ class RiskGate:
             return RiskVerdict.HALT
 
         # 更新权益峰值
-        if equity > self._equity_peak:
-            self._equity_peak = equity
-        equity_drop = (self._equity_peak - equity) / self._equity_peak \
-            if self._equity_peak > 0 else 0.0
+        # 权益骤降判定（统计套利口径，phase5-m8-defect-debate 修正）：
+        # 统计套利是市值中性配对仓，净值随行情正常浮动。旧版按"净值相对自身
+        # 峰值回撤 10%"判定权益骤降，净值一旦浮盈就反复跌破回撤线，
+        # 实测 HEAD 币数口径下触发 334 次 HALT 熔断风暴，吞掉所有开仓单（仅 8 笔成交）。
+        # 修正：权益骤降 = 净值相对 base_equity 绝对亏损 10%（净值跌破 0.9×base 才触发），
+        # 净值浮盈回落不触发。这是账户真实亏损而非波动，符合"权益骤降"本意。
+        equity_drop = (self.base_equity - equity) / self.base_equity \
+            if self.base_equity > 0 else 0.0
 
         # 2. regime 异常 → 拒单
         # 统计套利 MVP：regime 偶发 INVALID（如 h 越界）是信号层正常标记，
@@ -328,14 +332,18 @@ class CryptoRiskPolicy(RiskPolicyABC):
         self.bars_window = bars_window
 
     def gate(self, intent: OrderIntent, position: Position,
-             equity: float, book=None) -> RiskVerdict:
+             equity: float, book=None,
+             regime: Optional[RegimeStatus] = None) -> RiskVerdict:
         """加密市场风控裁决（调用核心 RiskGate）。
 
         book: 可选的 DepthBook，加密市场 MVP 阶段不使用盘口（K线回测）。
         未来实盘接入订单簿后，盘口价差>阈值 → 拒单。
+        regime: 成交 bar 的 regime（M8 引擎透传），None 默认 OK。
         """
         ts_ms = intent.ts_ms
-        verdict = self.risk_gate.gate(intent, position, equity, ts_ms)
+        reg = regime if regime is not None else RegimeStatus.OK
+        verdict = self.risk_gate.gate(intent, position, equity, ts_ms,
+                                      regime=reg)
         return verdict
 
     def calc_slippage(self, intent: OrderIntent, book) -> float:
