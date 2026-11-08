@@ -74,7 +74,8 @@ class GateClient:
     def fetch_candles(self, pair: str, interval: str, from_ts: int, to_ts: int,
                       window_days: int = 7, sleep_s: float = 0.3) -> list:
         """分页拉取 [from_ts, to_ts] 的全量 K 线（每次 ≤1000 根，规避频率限制）。"""
-        interval_s = {"1m": 60, "5m": 300, "1h": 3600, "1d": 86400}.get(interval, 3600)
+        interval_s = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                      "1h": 3600, "4h": 14400, "1d": 86400}.get(interval, 3600)
         window = window_days * 86400
         step = max(window // 2, interval_s)
         cur = from_ts

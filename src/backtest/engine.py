@@ -572,7 +572,11 @@ def compute_performance(equity: pd.Series, rets: pd.Series,
     sharpe = float(rets.mean() / std * annualize_factor) if std > 0 else 0.0
 
     # Calmar = 年化收益 / 最大回撤
-    ann_return = rets.mean() * (365.0 * 24.0)
+    # 尺度耦合修复（第四轮 15m/30m 试跑前置）：年化收益须与 annualize_factor 同源。
+    # 旧版硬编码 365×24(=1h bars/年)，对 4h/1d 升尺度把 Calmar 高估 4×/24×，
+    # 对 15m/30m 降尺度会低估 4×/2×。annualize_factor = √(bars_per_year)，
+    # 故 bars_per_year = annualize_factor²；1h 默认值下结果与原式完全一致。
+    ann_return = rets.mean() * (annualize_factor ** 2)
     calmar = float(ann_return / max_dd) if max_dd > 0 else float("inf")
 
     # 极端段收益（窗口内真实极端 2026-02）
