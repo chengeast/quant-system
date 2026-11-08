@@ -127,21 +127,37 @@ class MeanReversionStrategy:
         if state not in ("OK", "DEGRADED") and pos.state == "FLAT":
             return None
 
-        return self._state_machine(pos, z, ts_ms, half_life, spread_a, spread_b)
+        return self._state_machine(pos, z, ts_ms, half_life, spread_a, spread_b,
+                                   sig=sig)
 
     # ------------------------------------------------------------------
     # 状态机（核心逻辑）
     # ------------------------------------------------------------------
     def _state_machine(self, pos: PositionSnapshot, z: float, ts_ms: int,
-                       half_life: float, spread_a: float, spread_b: float
+                       half_life: float, spread_a: float, spread_b: float,
+                       sig: Optional[pd.DataFrame] = None
                        ) -> Optional[OrderIntent]:
-        # ---- 超时 bar 数 ----
+        # ---- 超时 bar 数（P2 修参数口径，phase5-m8-defect-debate 共识 3:0）----
+        # 旧：用单 bar half_life（410 天 ETH/SOL 下均值 407bar，50 倍偏态）→
+        #     timeout_bars = 1.2 × 407 = 488bar ≈ 20 天，远超正常持仓周期
+        #     → 超时几乎不触发，持仓被止损/回归离场吞掉。
+        # 修：用最近 sig 的有效半衰期中位数（7-9bar，决策口径）→
+        #     timeout_bars = max(timeout_hours×1, 1.2×median_H)
+        #     410 天 ETH/SOL 中位数 7-9bar → timeout ≈ 9-11bar，
+        #     符合"持仓 3-9h 未回归即超时强平"本意。
         bars_held = 0
         if pos.state in ("LONG_SPREAD", "SHORT_SPREAD") and pos.entry_ts_ms > 0:
             bars_held = int((ts_ms - pos.entry_ts_ms) / (3_600_000 / self.bars_per_hour))
-        if not np.isnan(half_life) and half_life > 0:
+        # P2：用 sig 最近有效 half_life 中位数替代单 bar half_life
+        hl_for_timeout = half_life
+        if sig is not None and "half_life" in sig.columns:
+            hl_valid = sig["half_life"].dropna()
+            hl_valid = hl_valid[hl_valid > 0]
+            if len(hl_valid) > 0:
+                hl_for_timeout = float(hl_valid.median())
+        if not np.isnan(hl_for_timeout) and hl_for_timeout > 0:
             timeout_bars = max(self.timeout_hours * self.bars_per_hour,
-                               self.timeout_half_life_factor * half_life)
+                               self.timeout_half_life_factor * hl_for_timeout)
         else:
             timeout_bars = self.timeout_hours * self.bars_per_hour
 
