@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
@@ -7,44 +6,48 @@ set PORT=8890
 set BASE=http://127.0.0.1:%PORT%
 
 echo ============================================================
-echo  统计套利回测控制台 · 一键启动
-echo  面板地址: %BASE%
-echo  停止: 关闭本窗口 或 Ctrl+C
+echo  Quant Backtest Console - One-Click Launch
+echo  Panel URL: %BASE%
+echo  To stop: close this window, or run the stop .bat
 echo ============================================================
 
-REM 检查 python
 where python >nul 2>nul
-if errorlevel 1 (
-    echo [错误] 未找到 python，请先安装 Python 3.9+ 并确保在 PATH。
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto nopy
 
-REM 端口占用检查
-netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul
-if not errorlevel 1 (
-    echo [提示] 端口 %PORT% 已被占用（可能 server 已运行）。
-    echo        直接打开浏览器: %BASE%
-    start "" "%BASE%"
-    pause
-    exit /b 0
-)
+REM Readiness and port-in-use checks use a real TCP connect, not a text-based port check - see P1.
+powershell -NoProfile -Command "try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 goto already
 
-echo 正在启动本地后端 (dashboard\server.py) ...
+echo Starting local backend (dashboard\server.py) ...
 start "quant-server" /min python dashboard\server.py --port %PORT%
 
-REM 等待端口就绪（最多 15 秒）
-set /a WAIT=0
-:LOOP
+set WAIT=0
+:loop
 timeout /t 1 /nobreak >nul
 set /a WAIT+=1
-netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul
-if not errorlevel 1 goto OPEN
-if %WAIT% LSS 15 goto LOOP
+powershell -NoProfile -Command "try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 goto open
+if %WAIT% LSS 15 goto loop
+echo [ERROR] Port %PORT% not reachable after %WAIT% s; backend may have failed to start.
+timeout /t 2
+exit /b 1
 
-echo [提示] 等待后端就绪较慢，仍尝试打开浏览器...
-:OPEN
+:open
 start "" "%BASE%"
-echo 面板已打开。停止服务: 标题为 quant-server 的隐藏窗口按 Ctrl+C，或手动结束 python 进程。
+echo Panel opened.
+echo To stop the backend: run the stop .bat, or end the python process manually.
 timeout /t 2
 exit /b 0
+
+:already
+echo [NOTE] Port %PORT% is already in use (server likely already running).
+echo        Opening browser directly at: %BASE%
+start "" "%BASE%"
+pause
+exit /b 0
+
+:nopy
+echo [ERROR] python not found in PATH.
+echo         Install Python 3.9+ and make sure it is on PATH, then retry.
+pause
+exit /b 1
