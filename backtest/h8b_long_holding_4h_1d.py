@@ -2,6 +2,11 @@
 """
 第八轮 · 4h/1d 长持有统计套利扫描（成本摊薄路径）
 
+【历史排查脚本，非新验收标准（2026-11-08）】
+  本脚本已把 stop_loss_sigma 改成“相对开仓点逆向再偏离 N σ”，并加入 timeout_bars 兜底；
+  但其止盈仍保留旧的绝对 0.5σ 口径，且未接入 StrategyRules 单一入口。
+  若用户要求“全部按现在的新标准重新测试”，请以 backtest/run_strategy_with_rules.py 为准。
+
 用已有 1h 410 天数据聚合出 4h/1d K 线（同源、免重拉），
 再扫「长持有期 30-90 天 + 低换手 + 校准滑点 0.5bp」，
 检验成本/毛利能否摊薄到冻结门槛 0.35 以内、夏普能否 >2。
@@ -77,7 +82,27 @@ def seg_gross(m, i, j, a, b, sign):
     return 0.5 * (ra - rb) * sign * 1e4
 
 
-def run_pair(m, iv, a, b, w_bars, sig, min_hold, hold_max):
+def triple_exit(z, i, exit_sigma=0.5, stop_sigma=2.0, timeout_bars=9999):
+    """三线并行平仓（开仓前锁定参照系，相对开仓点 i 的 z[i] 计算）。
+
+    ① 止盈 target：|z[j]| ≤ exit_sigma（回归到位）
+    ② 止损 stop ：相对开仓点逆向再偏离 stop_sigma（不是绝对 ±Nσ）
+    ③ 超时 timeout：持仓 bar ≥ timeout_bars（兜底）
+    优先级：止盈 > 止损 > 超时；返回平仓 bar j（j ≥ i+1，t+1 成交由调用方保证）。
+    """
+    entry_z = z[i]
+    long_pos = entry_z < 0
+    last = min(i + timeout_bars, len(z) - 2)
+    for j in range(i + 1, last + 1):
+        if abs(z[j]) <= exit_sigma:
+            return j
+        dev = (z[j] - entry_z) if long_pos else (entry_z - z[j])
+        if dev >= stop_sigma:
+            return j
+    return last
+
+
+def run_pair(m, iv, a, b, w_bars, sig, stop_sigma, timeout_bars, exit_sigma=0.5):
     ratio = np.log(m[f"{a}_close"] / m[f"{b}_close"])
     rs = pd.Series(ratio)
     mu = rs.rolling(w_bars).mean().to_numpy()
@@ -93,12 +118,9 @@ def run_pair(m, iv, a, b, w_bars, sig, min_hold, hold_max):
         if s == 0:
             i += 1
             continue
-        j = i + 1
-        last = min(i + hold_max, n - 2)
-        while j < last:
-            if abs(z[j]) <= 0.5 or (j >= i + min_hold and z[j] * z[j - 1] < 0):
-                break
-            j += 1
+        # 平仓 = 三线并行（止盈/止损/超时，开仓前已设好），非「固定持有到期」
+        j = triple_exit(z, i, exit_sigma=exit_sigma,
+                        stop_sigma=stop_sigma, timeout_bars=timeout_bars)
         g = seg_gross(m, i, j, a, b, s)
         if np.isfinite(g):
             out.append((i, j, s, g))
@@ -108,22 +130,14 @@ def run_pair(m, iv, a, b, w_bars, sig, min_hold, hold_max):
     gm = np.array([o[3] for o in out])
     net = gm - COST
     per_bar = np.zeros(n)
-    for (i, j, s, g) in out:
+    for k, (i, j, s, g) in enumerate(out):
         if j > i:
-            per_bar[i + 1:j + 2] += (net[(g in net).argmin() if False else 0] / 1e4) / (j - i + 1)
-    # 修正：上面摊错，重算
-    per_bar = np.zeros(n)
-    k = 0
-    for (i, j, s, g) in out:
-        nb = gm[k] - COST
-        k += 1
-        if j > i:
-            per_bar[i + 1:j + 2] += (nb / 1e4) / (j - i + 1)
+            per_bar[i + 1:j + 2] += (net[k] / 1e4) / (j - i + 1)
     sdv = per_bar.std()
     shp = float(per_bar.mean() / sdv * ann) if sdv > 0 else 0.0
     return {
         "pair": f"{a}/{b}", "iv": iv, "w": w_bars, "sig": sig,
-        "minhold": min_hold, "n": len(gm),
+        "stop": stop_sigma, "timeout": timeout_bars, "n": len(gm),
         "gross_bp": round(float(gm.mean()), 2), "cost_bp": COST,
         "net_bp": round(float(net.mean()), 2),
         "cum_net_bp": round(float(net.sum()), 1),
@@ -140,38 +154,39 @@ def main():
         m = resample_interval(m1h, iv)
         print(f"\n{iv}: {len(m)} bar（聚合自 1h 410 天）")
         # 持有期物理 30-90 天
-    hold_days = (30, 60, 90)
-    combos = set()
-    for hh in hold_days:
+        hold_days = (30, 60, 90)
         if iv == "4h":
-            hold_max_bars = int(hh * 6)       # 4h: 6 根/天
             w_bars = (6, 12, 24, 48)          # 1天/2天/4天/8天 均值回归窗口
+            timeout_bars = tuple(int(h * 6) for h in hold_days)  # 4h: 6根/天
         else:
-            hold_max_bars = int(hh)            # 1d: 1 根/天
             w_bars = (7, 14, 21, 30)
+            timeout_bars = hold_days           # 1d: 1根/天
+        stop_sigma = (1.5, 2.0, 3.0)
         sig_in = (2.0, 2.5, 3.0)
-        for w, sig, mh in itertools.product(w_bars, sig_in, (1, 3)):
+        combos = set()
+        for w, sig, stop, timeout in itertools.product(
+                w_bars, sig_in, stop_sigma, timeout_bars):
             for a, b in [
                 ("ETH", "SOL"), ("BTC", "DOGE"), ("XRP", "DOGE"),
                 ("SOL", "XRP"), ("BTC", "ETH"), ("SOL", "DOGE"),
             ]:
-                key = (a, b, w, sig, mh, hold_max_bars)
+                key = (a, b, w, sig, stop, timeout)
                 if key in combos:
                     continue
                 combos.add(key)
-                r = run_pair(m, iv, a, b, w, sig, mh, hold_max_bars)
+                r = run_pair(m, iv, a, b, w, sig, stop, timeout)
                 if r:
                     rows.append(r)
     df = pd.DataFrame(rows)
     OUT.mkdir(parents=True, exist_ok=True)
     df.to_csv(OUT / "h8b_long_holding_4h_1d.csv", index=False)
     print(f"\n共 {len(df)} 组")
-    cols = ["iv", "pair", "w", "sig", "minhold", "n", "gross_bp",
+    cols = ["iv", "pair", "w", "sig", "stop", "timeout", "n", "gross_bp",
             "cost_bp", "net_bp", "sharpe", "sharpe_gt2", "cost_over_gross"]
     print("\n=== 夏普 TOP 15 ===")
     print(df.sort_values("sharpe", ascending=False).head(15)[cols].to_string(index=False))
     gt2 = df[df["sharpe"] >= 2.0]
-    ok = df[(df["sharpe"] >= 2.0) & (df["cost_over_gross"] != "inf")
+    ok = df[(df["sharpe"] >= 2.0)
             & (df["cost_over_gross"].apply(lambda x: (x != "inf") and (float(x) <= 0.35)))]
     print(f"\n夏普≥2 总组数：{len(gt2)}；其中夏普≥2 且 成本/毛利≤0.35：{len(ok)}")
     if len(ok):

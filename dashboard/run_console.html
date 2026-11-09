@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>统计套利回测控制台 · 改参数→启动→看结果</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#f5f6f8; --panel:#fff; --line:#e3e6ea; --text:#1f2329; --muted:#6b7280;
+    --accent:#2563eb; --pos:#059669; --neg:#dc2626; --warn:#d97706;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { background:var(--panel); border-bottom:1px solid var(--line);
+           padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:17px; margin:0; }
+  header .meta { color:var(--muted); font-size:12px; text-align:right; }
+  main { padding:16px 20px; max-width:1240px; margin:0 auto; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+           padding:14px 16px; margin-bottom:14px; }
+  .panel h2 { font-size:14px; margin:0 0 10px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:780px){ .grid2{ grid-template-columns:1fr; } }
+  .fields { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }
+  .field { background:#fafbfc; border:1px solid var(--line); border-radius:6px; padding:8px 10px; }
+  .field label { font-size:12px; font-weight:600; display:block; margin-bottom:3px; }
+  .field input { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:5px;
+                 font:14px/1.2 ui-monospace,Consolas,monospace; }
+  .field .desc { font-size:11px; color:var(--muted); margin-top:3px; }
+  .tfs { display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; }
+  .tf { display:flex; align-items:center; gap:6px; background:#fafbfc; border:1px solid var(--line);
+        border-radius:6px; padding:6px 10px; font-size:13px; }
+  .tf .src { font-size:11px; padding:1px 6px; border-radius:10px; }
+  .src.real { background:#e7f6ee; color:#059669; }
+  .src.fb { background:#fdf2e3; color:#d97706; }
+  .src.miss { background:#fdeaea; color:#dc2626; }
+  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  button.run { background:var(--accent); color:#fff; border:0; border-radius:6px;
+               padding:10px 22px; font-size:15px; font-weight:600; cursor:pointer; }
+  button.run:disabled { opacity:.55; cursor:wait; }
+  button.reset { background:#fff; color:var(--text); border:1px solid var(--line);
+                 border-radius:6px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  #status { font-size:13px; color:var(--muted); }
+  #status.err { color:var(--neg); }
+  table.r { width:100%; border-collapse:collapse; font-size:13px; }
+  table.r th, table.r td { border:1px solid var(--line); padding:6px 8px; text-align:right; }
+  table.r th { background:#f0f3f7; font-weight:600; }
+  table.r td.tf, table.r th.tf { text-align:left; font-weight:700; }
+  tr.pass td { background:#eafaef; }
+  tr.fail td { background:#fff; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600; }
+  .tag.ok { background:#e7f6ee; color:#059669; }
+  .tag.bad { background:#fdeaea; color:#dc2626; }
+  .tag.un { background:#eef1f5; color:#6b7280; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .card-tag { font-size:11px; color:var(--muted); }
+  .card-title { font-size:12px; margin-top:2px; }
+  .card-val { font-size:17px; font-weight:700; margin-top:4px; }
+  svg { width:100%; height:240px; background:#fafbfc; border:1px solid var(--line);
+        border-radius:6px; display:block; }
+  .legend { font-size:12px; color:var(--muted); margin-top:6px; }
+  code { background:#eef1f5; padding:1px 5px; border-radius:4px; font-size:11px; }
+  .note { font-size:12px; color:var(--muted); margin-top:8px; }
+  .gates { list-style:none; padding:0; margin:0; columns:2; gap:16px; }
+  .gates li { font-size:12px; padding:2px 0; }
+  .gates li.ok { color:#059669; } .gates li.bad { color:#dc2626; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>统计套利回测控制台 · ETH×SOL（基准 BTC）</h1>
+  <div class="meta" id="headmeta">加载配置中…</div>
+</header>
+<main>
+
+  <div class="panel">
+    <h2>① 策略参数（StrategyRules 单一配置入口）</h2>
+    <div class="fields" id="fields"></div>
+    <div class="note">平仓语义：开仓后三线并行监控、先到先平——止盈=开仓点向0回归 / 止损=开仓点逆向再偏离 / 超时=持仓 bar 上限兜底（非主逻辑）。旧「到时间才平/固定持有」口径已废弃。</div>
+  </div>
+
+  <div class="panel">
+    <h2>② 回测周期（勾选；标签显示数据来源）</h2>
+    <div class="tfs" id="tfs"></div>
+  </div>
+
+  <div class="panel">
+    <div class="bar">
+      <button class="run" id="runBtn">▶ 启动回测</button>
+      <button class="reset" id="resetBtn">↺ 恢复默认参数</button>
+      <span id="status">就绪。点击下方按钮启动 5 周期回测。</span>
+    </div>
+  </div>
+
+  <div id="resultPanel" class="hidden">
+    <div class="cards" id="summaryCards"></div>
+    <div class="panel">
+      <h2>③ 各周期结果明细</h2>
+      <div style="overflow-x:auto"><table class="r" id="resTable"></table></div>
+      <div class="note" id="resNote"></div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><h2>④ 夏普 / Calmar 对比</h2><svg id="chartSC" viewBox="0 0 600 240" preserveAspectRatio="xMidYMid meet"></svg><div class="legend">绿=夏普(左轴)，蓝=Calmar(右轴)；冻结线 夏普≥2.0 / Calmar≥1.5。</div></div>
+      <div class="panel"><h2>⑤ 净收益(峰值) / 最大回撤 对比</h2><svg id="chartRD" viewBox="0 0 600 240" preserveAspectRatio="xMidYMid meet"></svg><div class="legend">柱=净收益峰值(%)，线=最大回撤(%)，红虚线=回撤≤10% 上限。</div></div>
+    </div>
+    <div class="panel">
+      <h2>⑥ 门槛判定明细（冻结：回撤≤10% · 夏普≥2.0 · Calmar≥1.5 · 跑赢BTC · 极端段不亏 · 成本可执行）</h2>
+      <div id="gateDetail"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="note">
+      后端 <code>dashboard/server.py</code>（端口 8890）已就绪：<code>GET /api/config</code> 取默认参数与数据可用性，<code>POST /api/run</code> 跑 5 周期返回 JSON。
+      本面板为离线单文件（原生 HTML/SVG/JS，无 CDN、无构建）。若双击打开后接口不通，请用 <code>python dashboard/server.py</code> 启动后访问 <code>http://127.0.0.1:8890/</code>。
+    </div>
+  </div>
+
+</main>
+
+<script>
+"use strict";
+const FIELDS = [
+  {k:"entry_sigma",  name:"entry",  label:"开仓阈值 entry_sigma", desc:"|z| ≥ 此值才开仓（默认 3.0）"},
+  {k:"take_profit_sigma_from_entry", name:"tp", label:"止盈 tp (σ from entry)", desc:"开仓点向0方向回归此σ平仓（默认 2.5）"},
+  {k:"stop_loss_sigma_from_entry", name:"sl", label:"止损 sl (σ from entry)", desc:"开仓点逆向再偏离此σ平仓（默认 2.0）"},
+  {k:"timeout_hours", name:"timeout_hours", label:"超时下限 timeout_hours(h)", desc:"持仓超此时长兜底（max(3h,1.2×HL)）（默认 3.0）"},
+  {k:"timeout_half_life_factor", name:"timeout_hl_factor", label:"超时 HL 系数", desc:"超时=1.2×半衰期（默认 1.2）"},
+  {k:"position_cap", name:"leg_eq_pct", label:"单腿仓位 leg_equity_pct", desc:"单腿占权益比例（默认 0.05）"},
+];
+let CFG = null;       // /api/config
+let DEFAULTS = {};    // field name -> default value
+
+function fmtPct(x){ if(x===null||x===undefined||isNaN(x)) return "N/A"; return (x*100).toFixed(2)+"%"; }
+function fmtNum(x,n){ if(x===null||x===undefined||isNaN(x)) return "N/A"; return Number(x).toFixed(n===undefined?3:n); }
+function fmtUsd(x){ if(x===null||x===undefined||isNaN(x)) return "N/A"; return "$"+Number(x).toFixed(2); }
+function pctClass(x,max){ if(x===undefined||x===null||isNaN(x)) return "un"; return x<=max?"ok":"bad"; }
+function gtClass(b){ return b?"ok":"bad"; }
+function boolize(v){ return v===true || v==="True" || v==="true" || v===1; }
+
+async function loadConfig(){
+  try{
+    const r = await fetch("/api/config");
+    CFG = await r.json();
+  }catch(e){
+    // 双击打开时 file:// 协议 fetch 会失败，给出提示
+    document.getElementById("headmeta").textContent="未连后端·请用 http://127.0.0.1:8890/ 打开";
+    document.getElementById("status").textContent="无法连接 /api/config：请先 python dashboard/server.py，再访问 http://127.0.0.1:8890/";
+    document.getElementById("status").className="err";
+    return;
+  }
+  DEFAULTS = {};
+  FIELDS.forEach(f=>{ DEFAULTS[f.name] = CFG.default_rules[f.k]; });
+  renderFields();
+  renderTimeframes();
+  document.getElementById("headmeta").innerHTML =
+    "币对 "+CFG.leg_a+"/"+CFG.leg_b+" · 基准 "+CFG.benchmark+"<br>冻结门槛 回撤≤"+
+    CFG.gate.max_drawdown_pct+"% · 夏普≥"+CFG.gate.min_sharpe+" · Calmar≥"+CFG.gate.min_calmar;
+}
+
+function renderFields(){
+  const wrap = document.getElementById("fields");
+  wrap.innerHTML = "";
+  FIELDS.forEach(f=>{
+    const d = document.createElement("div");
+    d.className="field";
+    d.innerHTML = '<label for="f_'+f.name+'">'+f.label+'</label>'+
+      '<input id="f_'+f.name+'" type="number" step="0.1" value="'+DEFAULTS[f.name]+'">'+
+      '<div class="desc">'+f.desc+'</div>';
+    wrap.appendChild(d);
+  });
+}
+
+function renderTimeframes(){
+  const wrap = document.getElementById("tfs");
+  wrap.innerHTML="";
+  (CFG.timeframes||["15m","30m","1h","4h","1d"]).forEach(tf=>{
+    const av = (CFG.data&&CFG.data[tf])||{};
+    let cls="miss", txt="缺失";
+    if(av.ok){ cls = (av.source&&av.source.indexOf("实拉")>=0)?"real":"fb"; txt = av.source||"可用"; }
+    else if(av.source){ cls="fb"; txt=av.source; }
+    const lab = document.createElement("label");
+    lab.className="tf";
+    lab.innerHTML = '<input type="checkbox" class="tfcb" value="'+tf+'" '+
+      (tf!=="1d"?"checked":"")+'> '+tf+' <span class="src '+cls+'">'+txt+'</span>';
+    wrap.appendChild(lab);
+  });
+}
+
+function getParams(){
+  const p={};
+  FIELDS.forEach(f=>{ p[f.name]=parseFloat(document.getElementById("f_"+f.name).value); });
+  const tfs=[]; document.querySelectorAll(".tfcb:checked").forEach(c=>tfs.push(c.value));
+  p.timeframes=tfs.length?tfs:["15m","30m","1h","4h","1d"];
+  return p;
+}
+
+function resetParams(){ FIELDS.forEach(f=>{ document.getElementById("f_"+f.name).value=DEFAULTS[f.name]; }); }
+
+async function run(){
+  const btn=document.getElementById("runBtn");
+  const st=document.getElementById("status");
+  const params=getParams();
+  btn.disabled=true; st.textContent="回测中…（5 周期，可能耗时数十秒）"; st.className="";
+  try{
+    const r=await fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(params)});
+    const data=await r.json();
+    if(data.error){ st.textContent="错误："+data.error; st.className="err"; }
+    else { renderResult(data); st.textContent="完成。已渲染 "+data.results.length+" 个周期结果。"; }
+  }catch(e){
+    st.textContent="请求失败："+e.message+"（确认 server.py 已启动于 8890）"; st.className="err";
+  }finally{ btn.disabled=false; }
+}
+
+// ---------- 结果渲染 ----------
+function renderResult(data){
+  document.getElementById("resultPanel").classList.remove("hidden");
+  const results=data.results||[];
+  // 汇总卡
+  const cards=document.getElementById("summaryCards");
+  const passed=(data.passed||[]).length;
+  cards.innerHTML =
+    card("通过周期", data.passed&&data.passed.length?data.passed.join(" / "):"无", data.passed&&data.passed.length?"ok":"bad") +
+    card("总周期", results.length, "") +
+    card("规则 entry", data.rules.entry_sigma, "") +
+    card("规则 tp/sl", data.rules.take_profit_sigma_from_entry+" / "+data.rules.stop_loss_sigma_from_entry, "");
+  // 表
+  const cols=[["周期","tf"],["数据来源","source"],["bar数","data_bars"],["成交","n_trades"],
+    ["净收益(峰)","peak_total_return"],["最大回撤","max_drawdown"],["夏普","sharpe"],["Calmar","calmar"],
+    ["成本","cost_paid"],["成本可执行","cost_executable"],["门槛","gate"]];
+  let html="<tr>"+cols.map(c=>"<th class='"+(c[1]==="tf"?"tf":"")+"'>"+c[0]+"</th>").join("")+"</tr>";
+  results.forEach(res=>{
+    const m=res.metrics||{};
+    const gp=m.gate_pass||{};
+    const allGate = gp && Object.keys(gp).length && Object.values(gp).every(boolize);
+    const costOk = m.cost_executable===true;
+    const ok = allGate && costOk;
+    const srcTxt = (typeof res.source==="string")?res.source:(res.source?JSON.stringify(res.source):"?");
+    const gateCell = ok? '<span class="tag ok">通过</span>' : '<span class="tag bad">未达</span>';
+    html+='<tr class="'+(ok?"pass":"fail")+'">';
+    html+="<td class='tf'>"+res.timeframe+"</td>";
+    html+="<td>"+srcTxt+"</td>";
+    html+="<td>"+fmtNum(res.data_bars,0)+"</td>";
+    html+="<td>"+fmtNum(res.n_trades,0)+"</td>";
+    html+="<td>"+fmtPct(m.peak_total_return)+"</td>";
+    html+="<td>"+fmtPct(m.max_drawdown)+"</td>";
+    html+="<td>"+fmtNum(m.sharpe)+"</td>";
+    html+="<td>"+fmtNum(m.calmar)+"</td>";
+    html+="<td>"+fmtUsd(m.cost_paid)+"</td>";
+    html+="<td>"+(costOk?'<span class="tag ok">✅</span>':'<span class="tag bad">❌</span>')+"</td>";
+    html+="<td>"+gateCell+"</td>";
+    html+="</tr>";
+  });
+  const tbl=document.getElementById("resTable"); tbl.innerHTML=html;
+  const realCnt = results.filter(r=> (typeof r.source==="string")&&r.source.indexOf("实拉")>=0).length;
+  document.getElementById("resNote").textContent =
+    "数据来源：实拉周期 "+realCnt+" 个；其余为 1h 聚合回退（样本偏薄，统计意义弱）。门槛=全部 gate 通过 且 成本可执行。";
+  // 图表
+  drawSC(results); drawRD(results);
+  // 门槛明细
+  renderGates(results);
+}
+
+function card(tag,val,cls){
+  const color = cls==="ok"?"var(--pos)":cls==="bad"?"var(--neg)":"var(--text)";
+  return '<div class="card"><div class="card-tag">'+tag+'</div><div class="card-val" style="color:'+color+'">'+val+'</div></div>';
+}
+
+function drawSC(results){
+  const svg=document.getElementById("chartSC");
+  const W=600,H=240,pad=40;
+  const xs=results.map(r=>r.timeframe);
+  const sharpes=results.map(r=>Number(r.metrics.sharpe)||0);
+  const calmars=results.map(r=>Number(r.metrics.calmar)||0);
+  const maxV=Math.max(2.0, ...sharpes, ...calmars, 1)*1.15;
+  let s='<line x1="'+pad+'" y1="'+(H-pad)+'" x2="'+(W-pad)+'" y2="'+(H-pad)+'" stroke="#bbb"/>';
+  // 冻结线 夏普2.0
+  const ySharpe = (H-pad) - (2.0/maxV)*(H-2*pad);
+  s+='<line x1="'+pad+'" y1="'+ySharpe+'" x2="'+(W-pad)+'" y2="'+ySharpe+'" stroke="#059669" stroke-dasharray="4 3"/>';
+  s+='<text x="'+pad+'" y="'+(ySharpe-4)+'" fill="#059669" font-size="10">夏普≥2.0</text>';
+  const yCalmar = (H-pad) - (1.5/maxV)*(H-2*pad);
+  s+='<line x1="'+pad+'" y1="'+yCalmar+'" x2="'+(W-pad)+'" y2="'+yCalmar+'" stroke="#2563eb" stroke-dasharray="4 3"/>';
+  s+='<text x="'+(W-pad-60)+'" y="'+(yCalmar-4)+'" fill="#2563eb" font-size="10">Calmar≥1.5</text>';
+  const n=xs.length, bw=(W-2*pad)/n;
+  results.forEach((r,i)=>{
+    const x=pad+i*bw+bw/2;
+    const sh=Number(r.metrics.sharpe)||0;
+    const ysh=(H-pad)-(sh/maxV)*(H-2*pad);
+    s+='<rect x="'+(x-12)+'" y="'+Math.min(ysh,H-pad)+'" width="22" height="'+Math.max(0,(H-pad)-ysh)+'" fill="'+(sh>=2.0?"#059669":"#9bd3b0")+'"/>';
+    s+='<text x="'+x+'" y="'+(ysh-4)+'" text-anchor="middle" font-size="10" fill="#1f2329">'+sh.toFixed(2)+'</text>';
+    const cm=Number(r.metrics.calmar)||0;
+    const ycm=(H-pad)-(cm/maxV)*(H-2*pad);
+    s+='<circle cx="'+(x+14)+'" cy="'+ycm+'" r="4" fill="'+(cm>=1.5?"#2563eb":"#9bbef0")+'"/>';
+    s+='<text x="'+x+'" y="'+(H-pad+16)+'" text-anchor="middle" font-size="11" fill="#1f2329">'+r.timeframe+'</text>';
+  });
+  s+='<text x="'+pad+'" y="14" font-size="11" fill="#6b7280">绿柱=夏普 蓝点=Calmar（均过冻结线为深色）</text>';
+  svg.innerHTML=s;
+}
+
+function drawRD(results){
+  const svg=document.getElementById("chartRD");
+  const W=600,H=240,pad=40;
+  const xs=results.map(r=>r.timeframe);
+  const nets=results.map(r=>{ const v=Number(r.metrics.peak_total_return)||0; return v*100; });
+  const dds=results.map(r=>{ const v=Number(r.metrics.max_drawdown)||0; return v*100; });
+  // 净收益范围
+  const maxN=Math.max(0.1, ...nets.map(Math.abs))*1.2;
+  let s='<line x1="'+pad+'" y1="'+(H-pad)+'" x2="'+(W-pad)+'" y2="'+(H-pad)+'" stroke="#bbb"/>';
+  const yDd = (H-pad) - (10/maxN)*(H-2*pad);
+  s+='<line x1="'+pad+'" y1="'+yDd+'" x2="'+(W-pad)+'" y2="'+yDd+'" stroke="#dc2626" stroke-dasharray="4 3"/>';
+  s+='<text x="'+(W-pad-90)+'" y="'+(yDd-4)+'" fill="#dc2626" font-size="10">回撤≤10% 上限</text>';
+  const n=xs.length, bw=(W-2*pad)/n;
+  results.forEach((r,i)=>{
+    const x=pad+i*bw+bw/2;
+    const net=Number(r.metrics.peak_total_return)||0; net*=100;
+    const y=(H-pad)-(Math.abs(net)/maxN)*(H-2*pad);
+    const h=Math.max(2,(H-pad)-y);
+    s+='<rect x="'+(x-14)+'" y="'+y+'" width="26" height="'+h+'" fill="'+(net>=0?"#059669":"#dc2626")+'"/>';
+    s+='<text x="'+x+'" y="'+(y-4)+'" text-anchor="middle" font-size="10" fill="#1f2329">'+net.toFixed(2)+'%</text>';
+    const dd=Number(r.metrics.max_drawdown)||0; dd*=100;
+    const yd=(H-pad)-(dd/maxN)*(H-2*pad);
+    s+='<circle cx="'+(x+14)+'" cy="'+yd+'" r="4" fill="#d97706"/>';
+    s+='<text x="'+x+'" y="'+(H-pad+16)+'" text-anchor="middle" font-size="11" fill="#1f2329">'+r.timeframe+'</text>';
+  });
+  s+='<text x="'+pad+'" y="14" font-size="11" fill="#6b7280">绿/红柱=净收益峰值(%) 橙点=最大回撤(%)</text>';
+  svg.innerHTML=s;
+}
+
+function renderGates(results){
+  const wrap=document.getElementById("gateDetail");
+  let html="";
+  results.forEach(res=>{
+    const m=res.metrics||{};
+    const gp=m.gate_pass||{};
+    const checks=[
+      ["净收益为正", boolize(gp.net_positive!==undefined?gp.net_positive:(Number(m.total_return||0)>0))],
+      ["跑赢BTC单边", boolize(gp.beat_benchmark)],
+      ["最大回撤≤10%", boolize(gp.max_dd)],
+      ["夏普≥2.0", boolize(gp.sharpe)],
+      ["Calmar≥1.5", boolize(gp.calmar)],
+      ["极端段不亏", boolize(gp.extreme_survived)],
+      ["成本可执行", boolize(m.cost_executable)],
+    ];
+    let lis="";
+    checks.forEach(c=>{ lis+='<li class="'+(c[1]?"ok":"bad")+'">'+(c[1]?"✅":"❌")+" "+c[0]+'</li>'; });
+    const allOk = checks.every(c=>c[1]);
+    html+='<div style="margin-bottom:10px"><b>'+res.timeframe+'</b> · 来源 '+
+      ((typeof res.source==="string")?res.source:"?")+' · <span class="tag '+(allOk?"ok":"bad")+'">'+
+      (allOk?"通过":"未达")+'</span><ul class="gates">'+lis+'</ul></div>';
+  });
+  wrap.innerHTML=html;
+}
+
+document.getElementById("runBtn").addEventListener("click",run);
+document.getElementById("resetBtn").addEventListener("click",resetParams);
+loadConfig();
+</script>
+</body>
+</html>

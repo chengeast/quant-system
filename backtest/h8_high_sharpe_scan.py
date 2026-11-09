@@ -2,6 +2,12 @@
 """
 第八轮 · 高夏普快速筛选扫描（H8）
 
+【部分口径已切换为 2026-11-08 新标准】
+  - 统计套利配对族：stop_loss_sigma 为“相对开仓点再逆向偏离 N σ”
+  - 超时：timeout_bars 仅作为兜底，不是“到时间才平”的主逻辑
+  - 截面动量族仍为周期性轮动，不属于统计套利验收口径
+  若要生成最终统一新报告，请运行 backtest/run_strategy_with_rules.py。
+
 目标：尽早找出夏普率 > 2.0 的候选策略，而不是逐套完整 M8。
 
 核心改动（比第六轮预筛更接近真实统计套利做法）：
@@ -118,6 +124,39 @@ def holding_trades(m: pd.DataFrame, trigger: np.ndarray,
     return out
 
 
+def triple_exit_line(z: np.ndarray,
+                     entry_i: int,
+                     exit_sigma: float = 0.5,
+                     stop_loss_sigma: float = 2.0,
+                     timeout_bars: int = 9999) -> int:
+    """三线并行平仓线（开仓前锁定参照系，与 M4 决策层同款语义）。
+
+    一笔在 bar i 开仓（方向由 z[i] 符号决定），持仓期间**并行**监控三条平仓线，
+    任意一条先触发即平仓，返回平仓 bar 下标 j（j≥i+1，t+1 成交由调用方保证）：
+      ① 止盈 target：|z[j]| ≤ exit_sigma（回归到位，正常获利了结）
+      ② 止损 stop ：|z[j]| ≥ |z[i]| + stop_loss_sigma（相对开仓点逆向再偏离 N σ，
+                    截断单笔亏损；注意不是绝对 ±Nσ，避免开仓即止损）
+      ③ 超时 timeout：j − i ≥ timeout_bars（兜底，防资金占用过久）
+    三线优先级：止盈 > 止损 > 超时（止盈先于止损，止损先于超时）。
+    全部相对开仓 bar i 的 z[i] 锁定，不随时间漂移。
+    三参数均可人工设置；若某条不想启用，把该参数设为不可能触发的极值。
+    """
+    n = len(z)
+    entry_z = z[entry_i]
+    long_pos = entry_z < 0          # z 负向偏离开多头（买 A 卖 B）
+    last = min(entry_i + timeout_bars, n - 2)   # n-2：保证 t+1 有 open 成交，不越界
+    for j in range(entry_i + 1, last + 1):
+        # ① 止盈：回归到 0.5σ 带内
+        if abs(z[j]) <= exit_sigma:
+            return j
+        # ② 止损：相对开仓点逆向再偏离 stop_loss_sigma
+        dev = (z[j] - entry_z) if long_pos else (entry_z - z[j])
+        if dev >= stop_loss_sigma:
+            return j
+        # ③ 超时：持仓 bar 达上限（j == last 时兜底）
+    return last
+
+
 def build_scan_grid(m: pd.DataFrame):
     """全网格：策略族 × 参数 × 滑点口径 × 成本口径。"""
     n = len(m)
@@ -125,25 +164,40 @@ def build_scan_grid(m: pd.DataFrame):
     ret = {s: m[f"{s}_close"].to_numpy() for s in SYMS}
     rows: list[dict] = []
 
-    # ---- 家族 1：统计套利配对（持仓式，不换手）----
+    def _event_walk(mm, trig, z, stop_sigma, timeout_bars,
+                    exit_sigma=0.5, a="ETH", b="SOL"):
+        """事件驱动走一遍持仓周期，平仓用三线并行（止盈/止损/超时，可人工设置）。"""
+        n = len(mm)
+        out, i = [], WARMUP
+        while i < n - 2:
+            s = int(trig[i])
+            if s == 0:
+                i += 1
+                continue
+            j = triple_exit_line(z, i, exit_sigma=exit_sigma,
+                                 stop_loss_sigma=stop_sigma,
+                                 timeout_bars=timeout_bars)
+            out.append((i, j, a, b, s))
+            i = j + 1
+        return out
+
+    # ---- 家族 1：统计套利配对（三线并行平仓：止盈/止损/超时，可人工设置）----
     for window in (24, 60, 120, 240):
         mu = pd.Series(ratio).rolling(window).mean().to_numpy()
         sd = pd.Series(ratio).rolling(window).std().to_numpy()
         z = np.where(sd > 0, (ratio - mu) / np.where(sd > 0, sd, 1), 0.0)
         trig = np.where(z <= -3.0, 1, np.where(z >= 3.0, -1, 0))
-        for min_hold in (1, 3, 6, 12, 24, 48, 96, 168, 360):
-            # 平仓条件：价差回归到 0.5σ 以内，或最小持有期已达成且价差开始向 0 收敛
-            # 修复：旧版 exit_rule 中 `j - (j - min_hold) == min_hold` 恒 0，平仓永远退化成 min_hold
-            exit_rule = lambda j, s, z=z, min_hold=min_hold, window=window: \
-                abs(z[j]) <= 0.5 or (j >= min_hold and z[j] * z[j - 1] < 0)  # 跨 0
-            trades = holding_trades(m, trig, exit_rule, min_hold)
-            for tag, c in [("slip0.5", COST_BP_CALIBRATED), ("slip4", COST_BP_OLD)]:
-                r = evaluate_sharpe(m, "MR_pair_holding",
-                                    f"window={window}/minhold={min_hold}/{tag}",
-                                    trades, c)
-                if r:
-                    r["cost_basis"] = tag
-                    rows.append(r)
+        for stop_sigma in (1.0, 2.0, 3.0):
+            for timeout_bars in (168, 360, 720):
+                trades = _event_walk(m, trig, z, stop_sigma, timeout_bars)
+                for tag, c in [("slip0.5", COST_BP_CALIBRATED), ("slip4", COST_BP_OLD)]:
+                    r = evaluate_sharpe(
+                        m, "MR_pair_triple_exit",
+                        f"window={window}/stop={stop_sigma}/to={timeout_bars}/{tag}",
+                        trades, c)
+                    if r:
+                        r["cost_basis"] = tag
+                        rows.append(r)
 
     # ---- 家族 2：截面动量轮动（持仓式，不换手）----
     for L in (24, 72, 168):
@@ -212,39 +266,50 @@ def build_scan_grid(m: pd.DataFrame):
             z2 = np.where(sd > 0, (ratio2 - mu) / np.where(sd > 0, sd, 1), 0.0)
             for sig_in in (2.0, 2.5, 3.0):
                 trig2 = np.where(z2 <= -sig_in, 1, np.where(z2 >= sig_in, -1, 0))
-                for min_hold in (24, 72, 168, 360):
-                    def _exit(j, s, z=z2, min_hold=min_hold):
-                        return abs(z[j]) <= 0.5 or (j >= min_hold and z[j] * z[j - 1] < 0)
-                    trades = holding_trades(m, trig2, _exit, min_hold)
-                    pairs_t = []
-                    for t in trades:
-                        i, j = t[0], t[1]
-                        sgn = t[4]
-                        ra = m[f"{aa}_open"].iat[j + 1] / m[f"{aa}_open"].iat[i + 1] - 1.0
-                        rb = m[f"{bb}_open"].iat[j + 1] / m[f"{bb}_open"].iat[i + 1] - 1.0
-                        g = 0.5 * (ra - rb) * sgn * 10_000.0
-                        pairs_t.append((i, j, g))
-                    gm = np.array([g for _, _, g in pairs_t], dtype=float)
-                    if len(gm) < 30:
-                        continue
-                    net = gm - COST_BP_CALIBRATED
-                    per_bar = np.zeros(n)
-                    for (i, j, g), nb in zip(pairs_t, net):
-                        if j > i:
-                            per_bar[i + 1:j + 2] += (nb / 10_000.0) / (j - i + 1)
-                    sdd = per_bar.std()
-                    shp = float(per_bar.mean() / sdd * ANNUALIZE) if sdd > 0 else 0.0
-                    rows.append({
-                        "strategy": "MR_pair_longhold",
-                        "params": f"{aa}/{bb}/w{w4}/sig={sig_in}/minhold={min_hold}",
-                        "n_trades": len(gm), "gross_bp": round(float(gm.mean()), 2),
-                        "cost_bp": COST_BP_CALIBRATED, "net_bp": round(float(net.mean()), 2),
-                        "cum_net_bp": round(float(net.sum()), 1),
-                        "win_rate": round(float((gm > COST_BP_CALIBRATED).mean()), 3),
-                        "sharpe": round(shp, 3), "sharpe_gt2": bool(shp >= 2.0),
-                        "cost_ratio": round(COST_BP_CALIBRATED / float(gm.mean()), 3)
-                        if gm.mean() > 0 else float("inf"), "cost_basis": "slip0.5",
-                    })
+                for stop_sigma in (1.5, 2.0, 3.0):
+                    for timeout_bars in (72, 168, 360):
+                        # 事件驱动走持仓周期，平仓用三线并行（止盈/止损/超时）
+                        trades, i = [], WARMUP
+                        while i < n - 2:
+                            s = int(trig2[i])
+                            if s == 0:
+                                i += 1
+                                continue
+                            j = triple_exit_line(z2, i, exit_sigma=0.5,
+                                                 stop_loss_sigma=stop_sigma,
+                                                 timeout_bars=timeout_bars)
+                            trades.append((i, j, aa, bb, s))
+                            i = j + 1
+                        pairs_t = []
+                        for t in trades:
+                            i, j = t[0], t[1]
+                            sgn = t[4]
+                            ra = m[f"{aa}_open"].iat[j + 1] / m[f"{aa}_open"].iat[i + 1] - 1.0
+                            rb = m[f"{bb}_open"].iat[j + 1] / m[f"{bb}_open"].iat[i + 1] - 1.0
+                            g = 0.5 * (ra - rb) * sgn * 10_000.0
+                            pairs_t.append((i, j, g))
+                        gm = np.array([g for _, _, g in pairs_t], dtype=float)
+                        if len(gm) < 30:
+                            continue
+                        net = gm - COST_BP_CALIBRATED
+                        per_bar = np.zeros(n)
+                        for (i, j, g), nb in zip(pairs_t, net):
+                            if j > i:
+                                per_bar[i + 1:j + 2] += (nb / 10_000.0) / (j - i + 1)
+                        sdd = per_bar.std()
+                        shp = float(per_bar.mean() / sdd * ANNUALIZE) if sdd > 0 else 0.0
+                        rows.append({
+                            "strategy": "MR_pair_triple_exit",
+                            "params": (f"{aa}/{bb}/w{w4}/sig={sig_in}/"
+                                       f"stop={stop_sigma}/to={timeout_bars}"),
+                            "n_trades": len(gm), "gross_bp": round(float(gm.mean()), 2),
+                            "cost_bp": COST_BP_CALIBRATED, "net_bp": round(float(net.mean()), 2),
+                            "cum_net_bp": round(float(net.sum()), 1),
+                            "win_rate": round(float((gm > COST_BP_CALIBRATED).mean()), 3),
+                            "sharpe": round(shp, 3), "sharpe_gt2": bool(shp >= 2.0),
+                            "cost_ratio": round(COST_BP_CALIBRATED / float(gm.mean()), 3)
+                            if gm.mean() > 0 else float("inf"), "cost_basis": "slip0.5",
+                        })
 
     return rows
 

@@ -18,11 +18,12 @@ M4 · 决策层 —— 统计套利（配对交易）进出规则
   进场：FLAT + |z|≥entry_sigma(3σ)
     - z ≥ +3σ：价差正向偏离 → 开 SHORT_SPREAD（卖 A 买 B，等回归）
     - z ≤ -3σ：价差负向偏离 → 开 LONG_SPREAD（买 A 卖 B，等回归）
-  离场：
-    - 正常：|z| ≤ exit_sigma(0.5σ)（回归到位）
-    - 止损：相对开仓点再逆向偏离 stop_loss_sigma（P4 修复；
-      旧版用绝对 ±2σ，与 ±3σ 进场冲突导致开仓即止损）
-    - 超时：持仓时长 ≥ max(3h, 1.2×H)
+    离场（**平仓条件在开仓前就设定好，是策略的核心组成**；持仓期间三线并行监控，
+    任意一条先触发即平仓，超时只是兜底而非主逻辑）：
+    - 止盈（exit）：|z| ≤ exit_sigma(0.5σ)，价差回归到位 → 正常获利了结
+    - 止损（stop_loss）：相对开仓点再逆向偏离 stop_loss_sigma（P4 修复；
+      旧版用绝对 ±2σ，与 ±3σ 进场冲突导致开仓即止损）→ 截断单笔亏损
+    - 超时（timeout）：持仓时长 ≥ max(timeout_hours, 1.2×H) → 防资金占用过久（兜底）
 
 仓位上限红线：持仓态下，若 |z| 进一步超过 entry_sigma（价差朝持仓方向更深偏离），
   只允许止损/离场，不允许加仓。
@@ -59,6 +60,71 @@ class PositionSnapshot:
     hedge_ratio_at_entry: float = 0.0
 
 
+@dataclass
+class StrategyRules:
+    """开仓标准 + 平仓标准的单一配置入口。
+
+    设计理念（用户 2026-11-08 明示）：
+      - 开仓前就锁定全部平仓条件，持仓期间三线并行监控（止盈/止损/超时），先到先平
+      - 所有距离统一为「σ 距离」，且都相对开仓点锁定参照系，避免绝对/相对口径混用
+      - 止盈是「开仓后向有利方向回归多少 σ」，止损是「开仓后向不利方向再偏离多少 σ」，
+        两者量纲一致，可直接比较盈亏比，避免「用 4 倍风险赌 1 倍收益」的参数失衡
+
+    字段语义（全部为开仓前设定，持仓期间逐 bar 并行检查）：
+      entry_sigma               开仓阈值：|z| >= entry_sigma 才开仓
+      take_profit_sigma_from_entry  止盈：从开仓点向 0 方向回归 >= 该 σ 数即获利了结
+      stop_loss_sigma_from_entry     止损：从开仓点向不利方向再偏离 >= 该 σ 数即截断
+      timeout_bars                超时：持仓 bar 数达到该值即兜底平仓（兜底，非主逻辑）
+      timeout_hours               物理小时下限，与 timeout_bars 取较大者
+      timeout_half_life_factor    半衰期倍数，timeout = max(timeout_hours,
+                                    factor × median_half_life, timeout_bars)
+
+    兼容旧参数名（旧 exit_sigma/stop_loss_sigma 为绝对 σ 口径）：
+      exit_sigma=0.5  → 近似映射 take_profit_sigma_from_entry = entry_sigma - 0.5
+                        （开仓 3σ 时回归 2.5σ 止盈；开仓 2σ 时回归 1.5σ 止盈）
+      stop_loss_sigma=2.0 → 等价 stop_loss_sigma_from_entry=2.0
+    """
+    entry_sigma: float = 3.0
+    take_profit_sigma_from_entry: float = 2.5   # 开仓 3σ → 回归到 |z|=0.5σ 止盈
+    stop_loss_sigma_from_entry: float = 2.0     # 开仓后逆向再偏离 2σ 止损
+    timeout_bars: int = 0                        # 0 = 仅由 timeout_hours/半衰期决定
+    timeout_hours: float = 3.0
+    timeout_half_life_factor: float = 1.2
+    position_cap: float = 0.05
+
+    @property
+    def exit_sigma(self) -> float:
+        """兼容旧接口：旧绝对口径止盈目标 |z| 带（entry - take_profit）。
+
+        注意：当前决策层平仓主语义已改为“开仓前锁定从开仓点回归多少 σ”，
+        因此 `_state_machine` 不再使用这个绝对 0.5σ 作为止盈触发线。
+        这里保留仅为旧参数名 / 兼容层使用。
+        """
+        return max(0.0, self.entry_sigma - self.take_profit_sigma_from_entry)
+
+    @property
+    def stop_loss_sigma(self) -> float:
+        return self.stop_loss_sigma_from_entry
+
+    def validate(self) -> None:
+        if self.entry_sigma <= 0:
+            raise ValueError("entry_sigma 必须 > 0")
+        if self.take_profit_sigma_from_entry < 0:
+            raise ValueError("take_profit_sigma_from_entry 必须 >= 0")
+        if self.take_profit_sigma_from_entry > self.entry_sigma:
+            raise ValueError(
+                "take_profit_sigma_from_entry 不应超过 entry_sigma"
+                "（开仓前锁定止盈距离不能超过开仓阈值）")
+        if self.stop_loss_sigma_from_entry <= 0:
+            raise ValueError("stop_loss_sigma_from_entry 必须 > 0")
+        if self.timeout_bars < 0:
+            raise ValueError("timeout_bars 必须 >= 0（0 表示不使用固定 bar 上限）")
+        if self.timeout_hours <= 0:
+            raise ValueError("timeout_hours 必须 > 0")
+        if self.timeout_half_life_factor <= 0:
+            raise ValueError("timeout_half_life_factor 必须 > 0")
+
+
 class MeanReversionStrategy:
     """统计套利决策器：消费 M3 信号，输出 OrderIntent。
 
@@ -67,6 +133,7 @@ class MeanReversionStrategy:
     """
 
     def __init__(self,
+                 rules: Optional[StrategyRules] = None,
                  entry_sigma: float = 3.0,
                  exit_sigma: float = 0.5,
                  stop_loss_sigma: float = 2.0,
@@ -79,6 +146,20 @@ class MeanReversionStrategy:
                  strategy_tag: str = "mean_reversion",
                  reestimate_window: int = 60,
                  reestimate_decay_ratio: float = 0.8):
+        # 单一配置入口（用户 2026-11-08）：rules 显式传入时，开仓/平仓标准全部来自它；
+        # 未传入时仍走旧式逐字段参数，保持向后兼容（M8 验收脚本零改动）。
+        if rules is None:
+            rules = StrategyRules(
+                entry_sigma=entry_sigma,
+                take_profit_sigma_from_entry=max(
+                    0.0, entry_sigma - exit_sigma),
+                stop_loss_sigma_from_entry=stop_loss_sigma,
+                timeout_hours=timeout_hours,
+                timeout_half_life_factor=timeout_half_life_factor,
+                position_cap=position_cap,
+            )
+        rules.validate()
+        self.rules = rules
         # 周期参数化：bar 时长 / 每小时 bar 数由 interval 派生，不再写死
         # 3_600_000 ms 或 bars_per_hour=1（用户 2026-11-08「周期不能写死」）。
         tf = resolve_timeframe(interval)
@@ -94,12 +175,12 @@ class MeanReversionStrategy:
                 )
         self.bars_per_hour = tf.bars_per_hour
         self.bar_ms = tf.bar_ms
-        self.entry_sigma = entry_sigma
-        self.exit_sigma = exit_sigma
-        self.stop_loss_sigma = stop_loss_sigma
-        self.timeout_hours = timeout_hours
-        self.timeout_half_life_factor = timeout_half_life_factor
-        self.position_cap = position_cap
+        self.entry_sigma = rules.entry_sigma
+        self.exit_sigma = rules.exit_sigma
+        self.stop_loss_sigma = rules.stop_loss_sigma
+        self.timeout_hours = rules.timeout_hours
+        self.timeout_half_life_factor = rules.timeout_half_life_factor
+        self.position_cap = rules.position_cap
         self.strategy_tag = strategy_tag
         self.reestimate_window = reestimate_window
         self.reestimate_decay_ratio = reestimate_decay_ratio
@@ -177,9 +258,11 @@ class MeanReversionStrategy:
                 hl_for_timeout = float(hl_valid.median())
         if not np.isnan(hl_for_timeout) and hl_for_timeout > 0:
             timeout_bars = max(self.timeout_hours * self.bars_per_hour,
-                               self.timeout_half_life_factor * hl_for_timeout)
+                               self.timeout_half_life_factor * hl_for_timeout,
+                               float(self.rules.timeout_bars))
         else:
-            timeout_bars = self.timeout_hours * self.bars_per_hour
+            timeout_bars = max(self.timeout_hours * self.bars_per_hour,
+                               float(self.rules.timeout_bars))
 
         # ============ FLAT：进场判断 ============
         if pos.state == "FLAT":
@@ -193,68 +276,47 @@ class MeanReversionStrategy:
                                          reason="entry")
             return None
 
-        # ============ LONG_SPREAD（价差多头，买A卖B）============
-        if pos.state == "LONG_SPREAD":
-            # P4 逻辑修复（第三轮辩论）：止损用「相对开仓点再偏离 stop_loss_sigma」，
-            # 旧版用绝对 -2σ，而进场是 -3σ → 开仓瞬间即满足止损 → 96% 平仓是
-            # stop_loss、持仓活不到价差回归，reg_rate 与真实 pnl 完全脱钩。
-            stop_z = self._stop_loss_z(pos, "LONG_SPREAD")
-            # 仓位上限红线：z 比开仓点更深（加仓区）→ 拦截新开仓
-            # 加仓区定义：z < entry_zscore（价差比开仓时偏离更深）
-            # 此区间只放行止损/超时/回归离场，不允许加仓
-            if self._would_add_position(pos, z):
-                if z <= stop_z:
-                    return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                             pos_state="FLAT", reason="stop_loss")
-                if bars_held >= timeout_bars:
-                    return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                             pos_state="FLAT", reason="timeout")
-                if abs(z) <= self.exit_sigma:
-                    return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                             pos_state="FLAT", reason="exit")
-                return None  # 加仓区且未达止损/超时/回归：拦截
-            # 止损：价差相对开仓点继续偏离 2σ → 止损离场
-            if z <= stop_z:
-                return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                         pos_state="FLAT", reason="stop_loss")
-            # 超时：强制离场
-            if bars_held >= timeout_bars:
-                return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                         pos_state="FLAT", reason="timeout")
-            # 正常离场：回归到 0.5σ 带内
-            if abs(z) <= self.exit_sigma:
+        # ============ 持仓态：三线并行平仓（先到先平，全部相对开仓点锁定参照系）============
+        # 设计理念（用户 2026-11-08 明示）：平仓条件在开仓前就设定好，是策略核心组成。
+        # 持仓期间**并行**监控三条独立平仓线，任意一条先触发即按该条平仓：
+        #   ① 止盈 target：从开仓点向 0 方向（有利方向）回归 >= take_profit_sigma_from_entry
+        #      （开仓 3σ → 回归 2.5σ 即平；默认等价于旧 |z| ≤ 0.5σ 目标，但语义是相对距离）
+        #   ② 止损 stop  ：从开仓点向不利方向再偏离 >= stop_loss_sigma_from_entry
+        #   ③ 超时 timeout：持仓 bar ≥ 上限（兜底，防资金占用过久，非主逻辑）
+        # 三线优先级：止盈 > 止损 > 超时。三者参照系全部锁定在开仓时刻的
+        # entry_zscore / entry_ts_ms，不随时间漂移。
+        # 旧 bug 修复（用户 2026-11-08 第二次强调）：
+        #   旧版止盈用绝对 |z| ≤ exit_sigma(0.5σ)，止损用相对开仓点 2σ，
+        #   两条线参照系不一致，容易形成「拿 4 倍风险赌 1 倍收益」的失衡参数组合。
+        #   新版统一改为「开仓前锁定从开仓点回归/偏离多少 σ」，两条线同量纲，可直接比较盈亏比。
+        if pos.state in ("LONG_SPREAD", "SHORT_SPREAD"):
+            is_long = pos.state == "LONG_SPREAD"
+            entry_z = pos.entry_zscore
+            tp_sigma = self.rules.take_profit_sigma_from_entry
+            # ① 止盈：从开仓点向 0 方向回归 tp_sigma（相对距离，非绝对 |z| 带）
+            if is_long:
+                hit_exit = (entry_z - z) >= tp_sigma   # z 从负向开仓点向 0 抬升
+            else:
+                hit_exit = (z - entry_z) >= tp_sigma   # z 从正向开仓点向 0 回落
+            # ② 止损：从开仓点向不利方向再偏离 stop_loss_sigma_from_entry
+            stop_z = self._stop_loss_z(pos, pos.state)
+            hit_stop = (z <= stop_z) if is_long else (z >= stop_z)
+            # ③ 超时：兜底
+            hit_timeout = bars_held >= timeout_bars
+            if hit_exit:
                 return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                          pos_state="FLAT", reason="exit")
-            return None
-
-        # ============ SHORT_SPREAD（价差空头，卖A买B）============
-        if pos.state == "SHORT_SPREAD":
-            stop_z = self._stop_loss_z(pos, "SHORT_SPREAD")
-            # 仓位上限红线：z 比开仓点更深（加仓区）→ 拦截新开仓
-            if self._would_add_position(pos, z):
-                if z >= stop_z:
-                    return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                             pos_state="FLAT", reason="stop_loss")
-                if bars_held >= timeout_bars:
-                    return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                             pos_state="FLAT", reason="timeout")
-                if abs(z) <= self.exit_sigma:
-                    return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                             pos_state="FLAT", reason="exit")
-                return None  # 加仓区且未达止损/超时/回归：拦截
-            # 止损：价差相对开仓点继续偏离 2σ
-            if z >= stop_z:
+            if hit_stop:
                 return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                          pos_state="FLAT", reason="stop_loss")
-            # 超时
-            if bars_held >= timeout_bars:
+            if hit_timeout:
                 return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
                                          pos_state="FLAT", reason="timeout")
-            # 正常离场
-            if abs(z) <= self.exit_sigma:
-                return self._make_intent(ts_ms, "close", z, spread_a, spread_b,
-                                         pos_state="FLAT", reason="exit")
-            return None
+            # 三条平仓线均未触发：
+            # 仓位上限红线——z 比开仓点更深（加仓区）→ 拦截新开仓，只维持原持仓
+            if self._would_add_position(pos, z):
+                return None      # 加仓区：不平、不加，维持原持仓等待三线之一触发
+            return None          # 正常区：未达止盈/止损/超时，继续持有
 
         return None
 

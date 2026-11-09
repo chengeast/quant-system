@@ -78,7 +78,7 @@ class LegAccount:
 
 from src.signal_layer.mean_reversion_signals import MeanReversionSignals
 from src.decision_layer.mean_reversion_strategy import (
-    MeanReversionStrategy, PositionSnapshot,
+    MeanReversionStrategy, PositionSnapshot, StrategyRules,
 )
 from src.risk_layer.risk_gate import RiskGate, CryptoRiskPolicy
 from src.execution_layer.execution_manager import (
@@ -132,6 +132,10 @@ class BacktestConfig:
     # 超时倍数（P2 后用 sig 的 half_life 中位数作 H）：timeout=max(3h, factor×H)
     # 暴露为可配置项，供第三轮专家辩论的参数扫描（phase5-p3-param-debate）
     timeout_half_life_factor: float = 1.2
+    # 单一配置入口（用户 2026-11-08）：开仓标准 + 平仓标准集中到一个 StrategyRules。
+    # 若显式传入 rules，则 M4 全部以其为准；否则由旧字段 entry_sigma/exit_sigma/... 组装，
+    # 保持向后兼容（M8 验收/既有调用点零改动）。
+    rules: Optional[StrategyRules] = None
     # 仓位口径（统计套利正确定义，phase5-m8-defect-debate 修正）：
     # 单腿占账户权益的固定比例，与 M5 max_single_exposure 对齐。
     # qty = base_equity × leg_equity_pct × confidence / 单腿价
@@ -213,13 +217,22 @@ class Backtester:
         )
         # 仓位口径：单腿占权益比例（与 M5 max_single_exposure 对齐），
         # 不是币数。M4 仍按币数产 intent，M8 在 submit 前换算成权益比例。
+        # 单一配置入口（用户 2026-11-08）：显式 rules 优先；
+        # 未显式传入时，由旧字段组装成“开仓前锁定目标/止损距离”的 StrategyRules，
+        # 使 M4 主链路在开仓前就锁定点位，避免绝对/相对口径混用。
+        effective_rules = cfg.rules
+        if effective_rules is None:
+            effective_rules = StrategyRules(
+                entry_sigma=cfg.entry_sigma,
+                take_profit_sigma_from_entry=max(0.0, cfg.entry_sigma - cfg.exit_sigma),
+                stop_loss_sigma_from_entry=cfg.stop_loss_sigma,
+                timeout_hours=cfg.timeout_hours,
+                timeout_half_life_factor=cfg.timeout_half_life_factor,
+                position_cap=cfg.leg_equity_pct,
+            )
+        self.rules = effective_rules
         self.strat = MeanReversionStrategy(
-            entry_sigma=cfg.entry_sigma,
-            exit_sigma=cfg.exit_sigma,
-            stop_loss_sigma=cfg.stop_loss_sigma,
-            timeout_hours=cfg.timeout_hours,
-            timeout_half_life_factor=cfg.timeout_half_life_factor,
-            position_cap=cfg.leg_equity_pct,   # 0.05 = 单腿 5% 权益（M8 换算用）
+            rules=effective_rules,
             interval=cfg.interval,
             bars_per_hour=cfg.bars_per_hour,    # 已由 timeframe 派生
             bar_ms=cfg.timeframe.bar_ms,

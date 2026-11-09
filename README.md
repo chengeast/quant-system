@@ -45,6 +45,19 @@
 
 实测环境：Python 3.13 / Windows。
 
+> **你自己怎么运行（2026-11-09 起，全部入口）**
+> 所有命令都在**项目根目录**执行（`quant-system/`）：
+>
+> ```bash
+> python run.py check        # 自检（最快，确认数据/依赖/参数指纹是否就绪）
+> python run.py              # 一键：自检 → M8 回测 → 重渲染看板
+> python run.py newrules     # 按最新 StrategyRules 标准，全周期(15m/30m/1h/4h/1d)重测
+>                             #   报告 → backtest/output/new_strategy_rules_report.md
+> python backtest/run_strategy_with_rules.py --tp 1.5   # 直接跑新入口并自定义止盈距离
+> python run.py acceptance   # 全量验收（约 6 分钟）
+> ```
+> 看板：`dashboard/index.html` 直接双击打开（离线单文件，无需联网/服务器）。
+
 ```bash
 git clone https://github.com/chengeast/quant-system.git   # 仓库当前为私有，clone 需已授权账号
 cd quant-system
@@ -72,6 +85,29 @@ python run.py                # 环境自检 → M8 端到端回测 → 重渲染
 python run.py check          # 只自检：依赖 / 数据 / 参数指纹 / 当前结论
 ```
 
+#### 按最新「开仓前锁定止盈/止损距离」新标准 · 全周期重测（2026-11-09 新增）
+
+新策略语义已落地为单一配置入口 `StrategyRules`（开仓 `|z|≥entry_sigma`；平仓三线并行先到先平，
+止盈/止损都相对**开仓点**锁定距离，超时只是兜底）。旧「到时间才平 / 固定持有 / min_hold+max_hold」
+口径已废弃。重新测试 15m/30m/1h/4h/1d 全部周期并出统一报告，直接运行：
+
+```bash
+# 最简：默认参数（3σ 开 / 回归 2.5σ 止盈 / 逆向 2σ 止损 / 超时 max(3h,1.2H) / 单腿 5%）
+python backtest/run_strategy_with_rules.py
+# 或经 run.py 统一入口
+python run.py newrules
+```
+
+报告输出到 `backtest/output/new_strategy_rules_report.md`（同名 `.json` 供程序消费）。
+可覆写的命令行参数：`--entry`（开仓 σ）`--tp`（止盈距离 σ）`--sl`（止损距离 σ）
+`--timeout-hours` `--timeout-hl-factor` `--timeout-bars` `--leg-eq-pct`。
+
+示例：只调止盈距离到 1.5σ、止损保持 2σ，跑 1h：
+
+```bash
+python backtest/run_strategy_with_rules.py --tp 1.5 --sl 2.0
+```
+
 跑完直接双击 `dashboard/index.html` —— **离线单文件**，无 CDN、无服务器、无构建步骤，内含净值 / 价差 / z-score 三个独立子图、持仓区、告警区、四件套指标卡与门槛判定。
 
 ### 全部子命令
@@ -82,6 +118,7 @@ python run.py check          # 只自检：依赖 / 数据 / 参数指纹 / 当�
 | `python run.py check` | 环境 / 数据 / 参数指纹 / 结论自检 |
 | `python run.py backtest` | 只跑 M8，产出 `golden_value.json` / `series.json` / `m8_backtest_report.md` |
 | `python run.py dashboard` | 只重渲染看板（用已有 `series.json`） |
+| `python run.py newrules` | **按最新 StrategyRules 标准全周期（15m/30m/1h/4h/1d）重测，出统一报告** |
 | `python run.py acceptance` | 全量验收 M1–M9 + 周期专项（约 6 分钟） |
 | `python run.py fetch` | 重新拉取 K 线（需 `.env` + 联网） |
 | `python run.py help` | 帮助 |

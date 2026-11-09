@@ -188,12 +188,22 @@ def fetch() -> None:
     print("数据准备完成，可执行 python run.py")
 
 
+def newrules() -> None:
+    """按最新 StrategyRules 新标准，全周期（15m/30m/1h/4h/1d）重测并出统一报告。"""
+    print("\n" + "=" * 72)
+    print("统一新标准 · 全周期重测（StrategyRules：开仓前锁定止盈/止损距离，三线并行先到先平）")
+    print("=" * 72)
+    _invoke("backtest/run_strategy_with_rules.py")
+    print(f"\n👉 统一报告：{OUT / 'new_strategy_rules_report.md'}")
+
+
 def main() -> int:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "all"
     commands = {
         "check": lambda: 0 if check() else 1,
         "backtest": lambda: (backtest(), 0)[1],
         "dashboard": lambda: (dashboard(), 0)[1],
+        "newrules": lambda: (newrules(), 0)[1],
         "acceptance": lambda: (acceptance(), 0)[1],
         "fetch": lambda: (fetch(), 0)[1],
         "all": lambda: (check(), backtest(), dashboard(), 0)[3],
