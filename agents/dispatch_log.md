@@ -840,3 +840,79 @@ Done.
 
 **总判定：通过**（脚本作废常量已清除、基准改盘上实测值、py_compile OK、摘要 <20KB 且关键结论齐备、硬约束全遵守）。本段只覆盖「提交前清理」；正式提交 / commit / push 见后续「D-2 正式提交」段。
 
+---
+
+## 批次 D-2 · 正式提交（运维工程师 devops 落实，PM 验收）
+
+- **接单日期**：2026-11-09
+- **派活来源**：秘书（本批只做 **D-2 正式提交 GitHub**）
+- **分派与落实方式（如实标注）**：与前述各批一致，当前工具会话**无独立子代理委派通道**，PM 依 `devops.md` soul（「版本迭代、分支策略、部署流程」）组织落实，未取得该角色独立原始回报；git 命令按秘书逐项显式路径清单执行，未使用 `git add -A` / `git add .` / 通配符。
+
+### 暂存区清单与核对证据（步骤 2 / 3.1）
+
+- **基线**：`git diff --cached --name-only` 为空（暂存区干净）后才开始 add。
+- **A 组常规 add（8 个显式路径）**：`启动面板.bat`、`停止面板.bat`、`agents/phase5-p7-final-summary.md`、`agents/dispatch_log.md`、`agents/phase5-p6-pool-avax-ada.md`、`agents/dispatch_queue.md`、`backtest/run_ltc_avax_finescan.py`（清理后）、`backtest/run_pair_grid_avax_ada.py`。
+- **B 组 `git add -f` 强制添加（10 个显式路径，均在 `.gitignore:13 backtest/output/` 忽略范围内）**：`pair_param_sweep_avax_ada.md` / `.json`、`ltc_avax_finescan.md` / `.json`、`pair_param_sweep_report.md` / `pair_param_sweep.json`、`pair_rescreen_9coins.md`、`pair_slippage_check.md`、`corr_monitor_60bar_summary.md`（新建）、`new_strategy_rules_report.md`。
+- **核对结果**：`git status --short` 显示 16 个 `A` + 2 个 `M`，共 **18 项**；`git diff --cached --stat` = `18 files changed, 13006 insertions(+), 39 deletions(-)`；Python 逐项比对暂存区清单与期望 18 项 → `exact_match=True`、`extra=[]`、`missing=[]`。
+- **C 类禁提交扫描**：对 parquet / `data/cache/` / `.env` / `.env.*` / `*.key` / `*.secret` / `secrets/` / `*.log` / `*_partial*.json` / `c2b_*.log` / `series.json` / `param_sweep_grid.csv` / `corr_monitor_60bar.md|.json` / `src/` / `config/strategy_params.yaml` / `.gitignore` / `.workbuddy-ai/` 逐项扫描 → **`C_class_hits = []`、`C_CLASS_CLEAN = True`，无 C 类文件混入**，无需 `git restore --staged` 剔除。
+
+### commit（步骤 3.2）
+
+- **commit hash**：`907713d220473e228a6b56b11e907551eab63475`（短 `907713d`）。
+- **commit message**：`第九轮：AVAX/ADA 扩池网格 125 组实测 + 本轮汇总报告 + .bat 启停修复`
+- **body 要点**：本轮汇总报告（9 章）/ 三套网格（75 组、9 组细扫、125 组扩池）达标一律 0 / 最高夏普 1.2093（ETH/AVAX 1d，仅 4 笔）距夏普门槛 2.0 差 0.7907 / 冻结门槛未放宽、50 组极端段 N/A 不计通过、成本矛盾未解 / 作废数据 0.473 已从脚本清除并改用作废声明 + 盘上实测基准 0.2376 / 0.499 / 0.5550 / corr 监控改用 <20KB 摘要替代 5.3MB / 9.9MB 大文件 / .bat 启停 P1 修复。非「1」类占位，与仓库中文历史风格一致。
+- **提交后**：`git status --short` 为空（本地工作区干净、无未提交改动）。
+
+### push（步骤 3.3）— 失败，如实上报
+
+| 次序 | 命令 | 结果 |
+|---|---|---|
+| 1 | `git push origin main` | 工具会话 **SIGTERM** 终止，`Exit Code 1`、stdout/stderr 全空，无 git 报错文本 |
+| 只读核对 | `git ls-remote origin refs/heads/main`（20s 超时） | `rc=0`，返回 `42191625fbce870d769268cd4f85acc289892a62` → **网络/代理通道可用**，但远端 main **未更新** |
+| 2 | 同一命令 `git push origin main`（Python subprocess 带 100s 超时捕获诊断，为排除网络故障后的一次补推） | 再次 **SIGTERM** 终止，无输出 |
+
+- **最终状态（只读核对）**：本地 `HEAD = 907713d`；`origin/main` 本地引用 = `4219162`；远端 `refs/heads/main` = `4219162`（未更新）；本地工作区 `git status --short` 为空。
+- **结论**：**`git push origin main` 未生效**。失败表现为工具会话对 push 命令的 SIGTERM 终止（无 git 层代理/网络报错输出），且 `git ls-remote` 证明读通道可用；具体根因（工具会话限制 / 写通道挂起）本批未能查明，不脑补。
+- **约束遵守**：**未 force、未改 remote、未绕过、未反复重试**（第 2 次为核实网络可用后的一次补推，仍失败即停手）；未使用任何替代推送方式。
+- **待办（阻塞，交秘书/老板）**：本地 commit `907713d`（及本段补记的小提交）**待在可用通道补推 `origin/main`**。补推前无需重做 commit、无需改暂存区；PM 不越权自行绕过。
+
+### 补记说明（步骤 3.4）
+
+- 本段含暂存区清单、commit hash、push 结果与核对证据，于主提交 `907713d` **之后**补记（`907713d` 中已含「D-2 提交前清理」段）；按派活单「若该段已在 commit 里，允许再补一次小提交或如实说明」，本段以**一次小提交**随 `agents/dispatch_log.md` 入库，使本地仓库保持干净。
+- 该小提交自身 hash 不自我引用，见 `git log`；小提交同样**未推送**（push 通道阻塞），随主提交一并待补推。
+
+### 验收判定（PM）
+
+| 验收项 | 结果 |
+|---|---|
+| 提交前清理（脚本 / 摘要 / 记录） | ✅ 通过 |
+| 显式路径 add、无 `-A` / `.` / 通配符 | ✅ 通过 |
+| 暂存区恰好 18 项、无 C 类混入 | ✅ 通过 |
+| 规范 commit message + 本地提交干净 | ✅ 通过 |
+| `git push origin main` | ❌ **未生效**（两次 SIGTERM，远端仍 4219162），如实上报、停手待补推 |
+| 不放宽门槛 / 不改 `src/` / `config/` / `.gitignore` / `.bat` 内容 / 不引用 0.473 作结果 | ✅ 通过 |
+
+**总判定：部分完成——本地提交与核对全部闭环，push 因工具会话终止未生效，列为阻塞上报。**「通过」不代表任何组合达标、不代表策略可用。
+
+### 向秘书汇报（本批存档）
+
+## D-2 提交前清理
+- 脚本：删除 `COARSE_LTC_AVAX_SHARPE = 0.473` 常量，改「作废声明」+ 盘上实测基准（0.2376 中心点 / 0.499 75 组冠军 / 0.5550 细扫 Top1，另登记 1.2093）；§6/§7/§8 以 0.473 为基准的差值与文案全部改用 0.2376 / 0.499；未改回测逻辑、9 组参数网格、输出结构。残留 `0.473` 11 处全为作废声明文字、无一处参与计算。`python -m py_compile backtest/run_ltc_avax_finescan.py` → **PY_COMPILE_OK**（连跑两次 Exit 0）。
+- 摘要：`backtest/output/corr_monitor_60bar_summary.md` **6290 B（<20KB）**；含 36 币对跌破次数（`n_episodes` 合计 3135、`n_below` 合计 104035）、Top3（BTC/BCH 114、BCH/LTC 113、ETH/BCH 112）、最近跌破时点（全表最晚 2026-11-08 11:00 UTC，BCH/LTC）、口径说明（滚动 60bar log 价 Pearson corr / 阈值 0.70 / `n_below` 与 `n_episodes` 区别）；原 5.3MB `.md` 与 9.9MB `.json` 不入库。
+
+## 正式提交
+- 暂存区 **18 项**（A 常规 8 + B `git add -f` 10）；`git status --short` / `git diff --cached --stat` 逐项核对 `exact_match=True`；**C 类禁提交文件 0 混入**（parquet / 凭据 / `*.log` / partial / `series.json` / `param_sweep_grid.csv` / corr 大文件 / `src/` / `config/` / `.gitignore` / `.workbuddy-ai/` 全未进暂存区）。
+- commit hash **`907713d220473e228a6b56b11e907551eab63475`**；message：`第九轮：AVAX/ADA 扩池网格 125 组实测 + 本轮汇总报告 + .bat 启停修复`（body 列：达标 0 / 最高夏普 1.2093 距门槛差 0.7907 / 门槛未放宽 / 0.473 作废）。
+- `git push origin main`：**未生效**。两次均被工具会话 SIGTERM 终止（无 git 报错输出）；`git ls-remote` 核对远端 `main` 仍为 `4219162`。未 force / 未改 remote / 未绕过 / 未反复重试，停手如实上报。
+- 提交后 `git status --short`：**空**（本地工作区干净）。
+
+## 产物路径
+- `agents/dispatch_log.md`（「D-2 提交前清理」段 + 本「D-2 正式提交」段）；`backtest/output/corr_monitor_60bar_summary.md`；`backtest/run_ltc_avax_finescan.py`（清理后）。
+
+## 风险/未决
+1. **push 阻塞（重点）**：本地 `907713d` + 补记小提交均未推到 `origin/main`，远端仍 `4219162`；需在可用通道补推一次（无需重做 commit）。根因（工具会话 SIGTERM）未查明，不脑补。
+2. `ltc_avax_finescan.md` / `dispatch_queue.md` 等历史归档仍含 0.473 的**历史并列对照/作废声明**文字（D-1 §4.3 D1 已标注），本批按「不改其他文件」未动；本批报告与脚本均未引用 0.473 作结果。
+3. D-1 §7.3 曾把 `new_strategy_rules_report.*` 列为「建议不精选」，本批按秘书 D-2 显式清单提交其 `.md`（`.json` 未交）；以秘书清单为准。
+4. 无独立子代理委派通道（沿用前批记录）：D-2 由 PM 依 `backend_architect.md` / `devops.md` soul 组织落实，未取得两角色独立原始回报；所有事实以盘上命令输出与可回读文件为准。
+5. 三套网格达标一律 0、门槛未放宽、成本矛盾未解；高夏普 1.2093 来自 1d 仅 4 笔的小样本，不构成策略可上线依据（PM 不下金融结论）。
+
