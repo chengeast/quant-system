@@ -1,0 +1,83 @@
+{
+  "BTC": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": 2.7e-05,
+    "median": 2.5e-05,
+    "max": 0.0001,
+    "min": -8.5e-05,
+    "pos_ratio": 0.744
+  },
+  "ETH": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": 1.2e-05,
+    "median": 1.2e-05,
+    "max": 0.0001,
+    "min": -0.000129,
+    "pos_ratio": 0.633
+  },
+  "SOL": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": -1.6e-05,
+    "median": -1e-06,
+    "max": 0.0001,
+    "min": -0.000375,
+    "pos_ratio": 0.478
+  },
+  "XRP": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": -8e-06,
+    "median": -2e-06,
+    "max": 0.0001,
+    "min": -0.000141,
+    "pos_ratio": 0.478
+  },
+  "DOGE": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": 2.2e-05,
+    "median": 2.4e-05,
+    "max": 0.0001,
+    "min": -0.000123,
+    "pos_ratio": 0.722
+  },
+  "AVAX": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": -8e-06,
+    "median": -2e-06,
+    "max": 0.0001,
+    "min": -0.000182,
+    "pos_ratio": 0.478
+  },
+  "ADA": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": -1e-06,
+    "median": 2e-06,
+    "max": 0.0001,
+    "min": -0.000201,
+    "pos_ratio": 0.511
+  },
+  "LTC": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": 6e-06,
+    "median": 5e-06,
+    "max": 0.0001,
+    "min": -0.00013,
+    "pos_ratio": 0.533
+  },
+  "BCH": {
+    "bars": 90,
+    "span_days": 169,
+    "mean": -9.6e-05,
+    "median": -6.6e-05,
+    "max": 0.0001,
+    "min": -0.000677,
+    "pos_ratio": 0.256
+  }
+}

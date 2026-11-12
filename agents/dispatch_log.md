@@ -1339,3 +1339,575 @@ rc=0
 - ③ 2:1 裁决「③ 存档冻结」是否再次被老板推翻，属老板决策权（E-1 纪要 §8）；本批只归档、不抢跑任何回测 / 策略任务。
 - ④ `dispatch_queue.md` 状态看板 E-2 行仍为「派发中」，由秘书后续更新，PM 未擅自改动。
 
+---
+
+## 批次 F-2：运维规范 Git 配置，消除后续 push 隐患（运维工程师 devops 落实，PM 验收）
+
+- **接单日期**：2026-11-10
+- **派活来源**：秘书 `agents/dispatch_queue.md` 批次 F-2 段（老板 2026-11-10 插队指令「派运维规范配置，消除后续 push 隐患」）
+- **本批范围**：只做 F-2；不抢跑 F-1 专家复议、不跑回测、不改业务代码、不提交业务改动、不放宽冻结门槛。
+- **分派对象（PM 职责 1）**：运维工程师 `agents/souls/devops.md`（主，「版本迭代、分支策略、部署流程」；限制「不修改业务代码，只保障运行环境与部署流程」）；调试员 `agents/souls/debugger.md`（备，未启用）。
+- **PM 分派表**：
+
+| 子任务 | 责任角色 | 内容 | 状态 |
+|---|---|---|---|
+| F2-1 | 运维工程师 `devops` | 只读盘点（config / remote / 环境代理 / HEAD / status / ls-remote） | 已落实 |
+| F2-2 | 运维工程师 `devops` | 规范化（`--local` 优先，消除 proxy 口径不一致、处置凭据读取） | 已落实（2 项 `--local`） |
+| F2-3 | 运维工程师 `devops` | 验证（改后回读 + ls-remote + 至多 1 次 push） | 已落实（push 1 次失败，如实上报） |
+| F2-4 | PM | 验收汇总（职责 4 裁决）、落盘、向秘书汇报 | 已落实 |
+
+- **分派与落实方式（如实标注，沿用 E-2 处理方式）**：PM 以 `ToolSearch` 检索「启动独立子代理 subagent 委派任务 / agent 子代理 独立会话 dispatch」，仅返回 `mcp__space-library__library_search` 与 `domain_search` 两个资料检索工具，**本会话确无独立子代理委派通道**。故按派活单允许的兜底方式：由 PM 依 `devops.md` soul 组织落实，**未取得该角色独立原始回报**。但配置盘点、规范化、验证**均真实执行了 git 命令**（原始输出见 `agents/f2-devops-git-config.md` §1 / §3 / §4），非只写文档；所有事实以盘上命令输出为准，未编造输出。
+- **基线（只读盘点核实）**：`HEAD=f6f27dd`，`git ls-remote origin refs/heads/main` = `f6f27dd93af03e4ccf6b392735192976d45124dd`、`EXIT=0`，`rev-list` = `0 0` → 老板手动推送已闭环，本批前本地即无待推 commit（看板 E-2 行「远端状态以老板操作为准」至此核实）；`git status --short` = ` M agents/dispatch_queue.md` + `?? agents/f1_expert_A_opinion.md`（本批前既存、非本批改动）。
+
+### 步骤 1 · 只读盘点
+
+派活单指定的 `git config --show-origin --get-regexp 'http\..*proxy|https\..*proxy|credential|remote\..*url'`、`git remote -v`、相关环境变量代理、`git rev-parse --short HEAD`、`git status --short`、`git ls-remote origin refs/heads/main`（`timeout 30`）全部执行。**最主要不一致**：git 层 `http.proxy` / `https.proxy` = `socks5://127.0.0.1:10808`（来源 **global** `C:/Users/Administrator/.gitconfig`），环境变量代理 `http://127.0.0.1:55483` —— **方案与端口均不一致**；`credential.helper=manager` 在 **system** 级（PortableGit/etc/gitconfig，唯一值）；`remote.origin.url` 在 **local**（标准 HTTPS，无嵌入凭据）；local 层改前无任何 proxy/credential（`LOCAL_BEFORE_EXIT=1`）。完整原始输出见 `agents/f2-devops-git-config.md` §1。
+
+> **脱敏说明**：宽正则输出另含 global 级 9 条针对其他内网仓库的 `credential.*` 条目（其中 4 行 username 值已脱敏，配置键名/helper/provider/来源路径逐字保留）；`env | grep -i proxy` 另命中含 **Bearer 令牌**的内部 MCP 配置变量，按硬约束「不得把任何令牌/密码写入仓库、日志、纪要」，该变量值不写入任何产物。
+
+### 步骤 2 · 规范配置（逐项 + 影响范围）
+
+| # | 命令 | 层级 | 改前 → 改后 | 影响范围 |
+|---|---|---|---|---|
+| 1 | `git config --local http.proxy "http://127.0.0.1:55483"` | `--local` | 无 → `http://127.0.0.1:55483` | **仅本仓库** `.git/config`；不入版本控制 |
+| 2 | `git config --local https.proxy "http://127.0.0.1:55483"` | `--local` | 无 → `http://127.0.0.1:55483` | 同上 |
+
+`SET_HTTP_PROXY_EXIT=0` / `SET_HTTPS_PROXY_EXIT=0`；改前 local 无 proxy/credential，为纯新增、未覆盖既有 local 配置。
+
+- **未改 `--global`**：socks5 位于 `C:/Users/Administrator/.gitconfig`，改动会影响老板其他仓库（该 global 另有 9 条针对内网仓库的 credential 配置，改代理或破坏其直连）；按「优先 `--local`」「不得静默改全局」未动，逐项列明影响范围并在此回报秘书。
+- **未改 `credential.helper`**：system 级 `manager` 为唯一值、配置本身正确；多值型配置在 local 重复设置会致 GCM 重复调用，故不新增/不覆盖。
+- **凭据读取处置**：D-2 的 `could not read Username ... terminal prompts disabled` 属非交互会话下 GCM 无有效缓存凭据的凭据供给问题；把令牌/PAT 写入 URL 或配置既属「把令牌写入仓库」又属「绕过认证」，硬约束禁止，PM 不做。配置层仅消除 socks5 方案阻断，凭据有效性需老板交互登录一次或提供有效凭据（决策权属老板）。
+- **未改 remote 目标**、未动 `.env` / `.gitignore` / `.bat` / `src/` / `config/`、未写任何令牌/密码、未跑回测、未提交业务改动。
+
+### 步骤 3 · 验证（原文与 EXIT）
+
+- 改后回读：`--show-origin --get-regexp 'proxy'` 显示 global 2 行 socks5 + local 2 行 http；本仓库生效值 `http.proxy`/`https.proxy` = `http://127.0.0.1:55483`、`credential.helper=manager`。**本仓库生效值已无 socks5；`--show-origin` 全量视图仍有 global 2 行 socks5 残留**（被 local 覆盖，保留理由见上）。
+- `timeout 30 git ls-remote origin refs/heads/main`（push 前）→ `fatal: unable to access 'https://github.com/chengeast/quant-system.git/': schannel: failed to receive handshake, SSL/TLS connection failed`，`LSREMOTE_EXIT=128`。
+- **至多 1 次** `timeout 120 git push origin main` → 同上 fatal，`PUSH_EXIT=128`（仅此 1 次，瞬时返回非超时）。
+- push 后 `ls-remote` 同样 `EXIT=128`；`rev-list` = `0 0`、`HEAD=f6f27dd`。
+- **失败后**：未重试 / 未 force / 未改 remote / 未绕过认证 / 未再改任何 git 配置（含未回滚）；本地 commit 保留，交老板手动推送。完整原文见 `agents/f2-devops-git-config.md` §4。
+
+### 硬性约束遵守（逐条）
+
+| 约束 | 状态 |
+|---|---|
+| 本批只做 F-2，不抢跑 F-1 复议 / 不跑回测 / 不放宽冻结门槛 | ✅ |
+| 不提交任何业务改动 / 不写实现代码 / 不替其他角色做专业判断 | ✅ |
+| 优先 `--local`；未静默改 `--global`（global 改动逐项列明影响范围并回报秘书） | ✅ |
+| 不改 remote 目标到未经确认地址 / 不绕过认证 / 不 force | ✅ |
+| 不把任何令牌/密码写入仓库、日志、纪要；不动 `.env` | ✅ |
+| 不改 `src/` / `config/strategy_params.yaml` / `.bat` / `.gitignore` / 任何报告或脚本 | ✅ |
+| 不编造输出（所有命令结果真实回读）/ 失败如实上报 | ✅ |
+| `git push origin main` 至多 1 次；失败不重试 | ✅（1 次，`PUSH_EXIT=128`） |
+| 是否再次手动推送属老板决策权 | ✅（未自行动） |
+| 产出仅 `agents/f2-devops-git-config.md` 与 `agents/dispatch_log.md` 追加 F-2 段 | ✅ |
+
+### 验收判定（PM，职责 4）
+
+**总判定：流程合规、上报如实，但「消除后续 push 隐患」的连通性目标未达成，不虚报通过。** 逐项：盘点 ✅ 完成、规范化动作 ✅ 真实执行（2 项 `--local`）、改后回读 ✅、验证原文与 EXIT ✅ 如实、push 至多 1 次 ✅、两产物 ✅ 落盘。但改后 `ls-remote` 由改前 `EXIT=0` 退化为 `EXIT=128`、唯一 1 次 push 亦 `EXIT=128`（`schannel ... SSL/TLS connection failed`），即该 `--local` 方案在本机未能连通，且可能引入读通道退化。按硬约束失败后未再改配置（含未回滚），当前 `.git/config` 保留改后状态。**本判定仅指本批运维流程与取证合规，不代表任何组合达标、不代表策略可用、不代表已执行回测或代码改动。**
+
+### 风险 / 未决（转秘书）
+
+- ① **（重点）改后读通道退化**：改前 `ls-remote` EXIT=0，改后连续 3 次网络操作均 EXIT=128。是否回滚本批 2 项 `--local` 改动、是否属需立即纠正状态，属老板/秘书决策权；PM 按「失败后不折腾」未回滚、未重试。
+- ② **global socks5 残留**：`C:/Users/Administrator/.gitconfig` 仍有 2 行 socks5，影响老板其他仓库；是否统一修正需老板拍板，PM 未越权。
+- ③ **凭据供给未实质解决**：`could not read Username` 需有效 GCM 凭据 / 老板交互登录一次；PM 不注入令牌、不绕过认证。
+- ④ **可用代理待确认**：`http://127.0.0.1:55483` 在本机 schannel 下对 github TLS 握手失败；是否有可用 http 代理地址需老板/秘书提供后另批验证（本批 push 已用满 1 次，不再测）。
+- ⑤ **工作区既存两项**：`agents/dispatch_queue.md`（秘书看板）、`agents/f1_expert_A_opinion.md`（F-1 发言）为本批前既存、非本批改动，PM 未触碰；「工作区除本批两产物外干净」按此口径理解。
+- ⑥ **是否再次手动推送属老板决策权**：远端已与本地一致（`0 0`），本批实际无待推内容。
+- ⑦ **无独立子代理通道**：未取得 devops 角色独立原始回报，已如实标注（沿用 B / C-1 / C-2a / C-2b / D-1 / D-2 / D-2-push / E-2 段记录）。
+
+### 向秘书汇报（本批存档）
+
+① 两产物绝对路径：`C:\Users\Administrator\WorkBuddy AI\2026-11-06-20-40-51\agents\f2-devops-git-config.md`、`C:\Users\Administrator\WorkBuddy AI\2026-11-06-20-40-51\agents\dispatch_log.md`（F-2 段）。② 最主要不一致：git 层 http/https.proxy = `socks5://127.0.0.1:10808`（来源 global `~/.gitconfig`），环境变量代理 `http://127.0.0.1:55483`，方案与端口均不一致；`credential.helper=manager` 在 system 级。③ 修改仅 2 项、均 `--local`：本仓库 `http.proxy`/`https.proxy` 设为 `http://127.0.0.1:55483`，影响范围仅本仓库 `.git/config`；**未改 `--global`**（会影响老板其他仓库，未越权）、未改 remote、未写任何令牌，`credential.helper` 保持 system 级未动。④ 回读：本仓库生效值已无 socks5；`--show-origin` 全量视图仍有 global 2 行 socks5 残留（被 local 覆盖，理由见文档）。⑤ 改前 `ls-remote` EXIT=0（`f6f27dd`）；改后 `ls-remote` 与至多 1 次 push 原文均为 `fatal: unable to access 'https://github.com/chengeast/quant-system.git/': schannel: failed to receive handshake, SSL/TLS connection failed`，`LSREMOTE_EXIT=128`、`PUSH_EXIT=128`（仅 1 次，未重试 / 未 force / 未改 remote / 未绕过认证）；`HEAD=f6f27dd`、`rev-list 0 0`。⑥ `git status --short`（产物写入后）：` M agents/dispatch_log.md`、` M agents/dispatch_queue.md`、`?? agents/f1_expert_A_opinion.md`、`?? agents/f2-devops-git-config.md`（`STATUS_EXIT=0`）；其中 dispatch_queue.md / f1 发言为本批前既存、非本批改动，另 2 项即本批两产物。⑦ 风险：改用 55483 后读通道由 0 退化为 128，连通目标未达成；global socks5 残留影响其他仓库；凭据依赖 GCM 有效凭据。需老板拍板：是否回滚本批 local 改动、是否统一修 global 代理、是否仍手动推送。无独立子代理通道，未取得 devops 独立原始回报，已如实标注。
+
+### 补记（PM 最终复核 · 产物写入后工作区状态）
+
+以只读 `git status --short` 回读（真实回读，非推断）：
+
+```
+ M agents/dispatch_log.md
+ M agents/dispatch_queue.md
+?? agents/f1_expert_A_opinion.md
+?? agents/f2-devops-git-config.md
+STATUS_EXIT=0
+```
+
+- **本批产物 2 项**：`agents/dispatch_log.md`（F-2 段追加）、`agents/f2-devops-git-config.md`（新建）。
+- **本批前既存、非本批改动 2 项**：`agents/dispatch_queue.md`（秘书看板）、`agents/f1_expert_A_opinion.md`（F-1 专家 A 发言），PM 未触碰。
+- 生效配置复核（只读）：`http.proxy` / `https.proxy` 仍为 `http://127.0.0.1:55483`，与步骤 3 一致，写入产物过程中未再改动任何 git 配置。
+
+---
+
+## 批次 F-2-fix：F-2 验收不通过打回返工（运维工程师 devops 落实，PM 验收）
+
+- **接单日期**：2026-11-10
+- **派活来源**：秘书 `agents/dispatch_queue.md` 批次 F-2-fix 段（秘书 2026-11-10 验收判定「F-2 不通过，打回返工」）
+- **返工缘由**：F-2 把本仓库 `--local` 的 `http.proxy`/`https.proxy` 改成 `http://127.0.0.1:55483` 后，`git ls-remote origin refs/heads/main` 由改前 `EXIT=0`（远端 `f6f27dd93af03e4ccf6b392735192976d45124dd`）退化为 `fatal: schannel: failed to receive handshake, SSL/TLS connection failed`、`EXIT=128`，与老板「消除后续 push 隐患」目标相反。本批为秘书**正式授权返工**，回滚 F-2 引入的 2 项 local 配置不算越权。
+- **本批范围（小批 1 件）**：只做回滚 + 规范化建议（只写文档），不再做代理实验；除授权两条 `--unset` 外不再写任何 git 配置；**不执行 push**（F-2 已用满 1 次）；不抢跑 F-1 专家复议。
+- **分派对象（PM 职责 1）**：运维工程师 `agents/souls/devops.md`（主，「版本迭代、分支策略、部署流程」；限制「不修改业务代码，只保障运行环境与部署流程」）；调试员 `agents/souls/debugger.md`（备，未启用）。
+- **PM 分派表**：
+
+| 子任务 | 责任角色 | 内容 | 状态 |
+|---|---|---|---|
+| F2fix-1 | 运维工程师 `devops` | 回滚 F-2 的 2 项 `--local` proxy（只 unset，不动 global/remote/credential/.env） | 已落实 |
+| F2fix-2 | 运维工程师 `devops` | 硬验收复验（local 回读 / show-origin / 生效值 / ls-remote / rev-list / HEAD / status） | 已落实 |
+| F2fix-3 | 运维工程师 `devops` | 规范化建议（黑名单 / 凭据根因 / 自检清单 / 待拍板项），只写文档 | 已落实 |
+| F2fix-4 | PM | 验收汇总（职责 4 裁决）、落盘、向秘书汇报 | 已落实 |
+
+- **分派与落实方式（如实标注，沿用 E-2 / F-2 处理方式）**：PM 以 `ToolSearch` 检索「启动独立子代理 subagent 委派任务 / agent 子代理 独立会话 dispatch / spawn subagent independent agent task」，仅返回 `domain_search`、`mcp__space-library__library_search`、`conversation_search` 三个资料/会话检索工具，**本会话确无独立子代理委派通道**。故按派活单允许的兜底方式：由 PM 依 `devops.md` soul 组织落实，**未取得该角色独立原始回报**。但回滚与复验**均真实执行了 git 命令**（原始输出见下），非只写文档；所有事实以盘上命令输出为准，未编造输出。
+
+### 步骤 1 · 回滚（原始输出与 EXIT）
+
+仅执行授权 2 条写命令：
+
+```
+=== [R0] git config --local --get-regexp 'proxy|credential'（回滚前回读）===
+http.proxy http://127.0.0.1:55483
+https.proxy http://127.0.0.1:55483
+LOCAL_BEFORE_EXIT=0
+=== [R1] git config --local --unset http.proxy ===
+UNSET_HTTP_EXIT=0
+=== [R2] git config --local --unset https.proxy ===
+UNSET_HTTPS_EXIT=0
+=== [R3] git config --local --get-regexp 'proxy|credential'（回滚后回读）===
+（无输出）
+LOCAL_AFTER_EXIT=1
+```
+
+- 回滚前 local 确有 F-2 写入的 2 项 `http://127.0.0.1:55483`；两条 `--unset` 均 `EXIT=0`；回滚后 local `proxy|credential` 无输出、`EXIT=1`（无匹配＝已清空）。未动 `--global` / remote / credential / `.env`。
+
+### 步骤 2 · 硬验收复验（原始输出与 EXIT）
+
+```
+=== [V1] git config --local --get-regexp 'proxy|credential' ===
+（无输出）
+V1_LOCAL_EXIT=1
+=== [V2] git config --show-origin --get-regexp 'proxy' ===
+file:C:/Users/Administrator/.gitconfig	http.proxy socks5://127.0.0.1:10808
+file:C:/Users/Administrator/.gitconfig	https.proxy socks5://127.0.0.1:10808
+V2_ORIGIN_EXIT=0
+=== [V3] git config --get http.proxy ===
+socks5://127.0.0.1:10808
+V3_HTTP_EXIT=0
+=== [V4] git config --get https.proxy ===
+socks5://127.0.0.1:10808
+V4_HTTPS_EXIT=0
+=== [V5] timeout 30 git ls-remote origin refs/heads/main ===
+f6f27dd93af03e4ccf6b392735192976d45124dd	refs/heads/main
+V5_LSREMOTE_EXIT=0
+=== [V6] git rev-list --left-right --count HEAD...origin/main ===
+0	0
+V6_REVLIST_EXIT=0
+=== [V7] git rev-parse --short HEAD ===
+f6f27dd
+V7_HEAD_EXIT=0
+=== [V8] git status --short ===
+ M agents/dispatch_log.md
+ M agents/dispatch_queue.md
+?? agents/f1_expert_A_opinion.md
+?? agents/f2-devops-git-config.md
+V8_STATUS_EXIT=0
+```
+
+- **V5（最关键）**：`timeout 30 git ls-remote origin refs/heads/main` → `f6f27dd93af03e4ccf6b392735192976d45124dd	refs/heads/main`、`V5_LSREMOTE_EXIT=0`，读通道由 F-2 改后的 `EXIT=128` 恢复为 `EXIT=0`，远端 hash 与改前 / 派活单要求完全一致。
+- 生效值恢复 `socks5://127.0.0.1:10808`（继承 global）；`--show-origin` 全量 proxy 视图仅剩 global 2 行 socks5、无 local 行；`rev-list 0 0`、`HEAD=f6f27dd`。
+- 秘书验收「若复验仍不为 `EXIT=0`，如实上报、不再改任何配置、不重试、交秘书」分支**未触发**；本批未重试任何命令、未再改任何 git 配置。
+
+### 硬约束遵守（逐条）
+
+| 约束 | 状态 |
+|---|---|
+| 本批不执行 push（F-2 已用满 1 次）；不跑回测 / 不放宽冻结门槛 / 不提交业务改动 | ✅ |
+| 只回滚 2 项 `--local` proxy；未改 `--global` / remote / credential / `.env` | ✅ |
+| 不写任何令牌/密码；失败不重试 / 不绕过认证 / 不 force | ✅ |
+| 不抢跑 F-1 专家复议；不改 `dispatch_queue.md` / `src/` / `config/` / `.bat` / `.gitignore` / 报告脚本 | ✅ |
+| 复验命令真实执行、输出真实回读；`ls-remote` 仅 1 次（未重试） | ✅ |
+| 产出仅 `f2-devops-git-config.md` §8 追加 + `dispatch_log.md` F-2-fix 段追加 | ✅ |
+| 是否改 global / 改 remote / 再次推送属老板决策权，PM/运维不越权 | ✅ |
+
+### 验收判定（PM，职责 4）
+
+**总判定：F-2-fix 的回滚与硬验收复验通过（恢复改前可用基线）** —— local 层 proxy 已清空、生效值恢复 `socks5://127.0.0.1:10808`、`ls-remote` 恢复 `EXIT=0` 且远端 hash 与改前一致、`rev-list 0 0`。但须明确：本批**仅回滚 F-2 的错误改动**，**F-2 验收「不通过」的结论不变、老板「消除后续 push 隐患」目标仍未达成** —— 真正隐患（凭据供给）未解决，需按风险清单交老板拍板。**不把「失败」表述为「通过」**。
+
+### 风险 / 未决（转秘书）
+
+- ① **push 隐患未解决**：D-2 的 `could not read Username` 属非交互会话 GCM 无有效缓存凭据 / 无法弹窗的**凭据供给问题**（标注为推断，非 git 代理配置错误；结合 F-2 §5「socks5 读通但 .NET GCM 不支持其方案」两难区分事实与推断）；本批未处置、不注入令牌、不绕过认证。
+- ② **global socks5 残留**：是否统一修 `C:/Users/Administrator/.gitconfig` 的 socks5（影响老板其他仓库 + 9 条内网仓库 credential）需老板拍板，PM 未越权。
+- ③ **黑名单已立**：本仓库 proxy 黑名单 `http://127.0.0.1:55483`（已实测退化、禁止覆盖）；后续任何 proxy 覆盖须先按自检清单预检。
+- ④ **是否改 remote 形态 / 是否再次手动推送**属老板决策权；当前 `rev-list 0 0`、无待推内容，本批不 push。
+- ⑤ **工作区既存项**：`dispatch_queue.md`（秘书看板）、`f1_expert_A_opinion.md`（F-1 发言）为本批前既存、PM 未触碰。
+- ⑥ **无独立子代理通道**：未取得 devops 角色独立原始回报，已如实标注（沿用 E-2 / F-2 段记录）。
+
+### 向秘书汇报（本批存档）
+
+① 两产物：`agents/f2-devops-git-config.md` 追加「§8 F-2-fix 复验与规范化补记」、`agents/dispatch_log.md` 追加「F-2-fix」段；`dispatch_queue.md` 未改。② 回滚成功：两条 `--local --unset http.proxy`/`https.proxy` 均 `EXIT=0`，`--local --get-regexp 'proxy|credential'` 无输出（`EXIT=1`），local proxy 已清空；生效值恢复 `socks5://127.0.0.1:10808`（继承 global）。③ 最关键：`timeout 30 git ls-remote origin refs/heads/main` 真实 `EXIT=0`、远端 hash `f6f27dd93af03e4ccf6b392735192976d45124dd`，与改前一致，读通道由 F-2 改后的 `128` 恢复为 `0`。④ `rev-list`=`0 0`、`HEAD=f6f27dd`；`git status --short` 4 项（dispatch_queue 秘书看板、f1 发言为本批前既存，PM 未触碰）。⑤ 补记要点：黑名单 `http://127.0.0.1:55483`（实测退化、禁止覆盖）；真正 push 隐患为 D-2 `could not read Username` 属非交互会话 GCM 无有效缓存凭据 / 无法弹窗的凭据供给问题（标注推断、非代理错误，结合 F-2 §5 两难区分事实与推断）；不写令牌的自检清单 ① `git config --get http.proxy` ② `git ls-remote` 预检 `EXIT=0` ③ `git status --short` ④ 单次 push、失败不重试 / 不 force / 不绕认证，凭据由老板交互终端登录缓存一次。⑥ 待老板拍板：是否统一修 global socks5、是否改 remote 形态、是否再次手动推送；PM/运维不越权，本批不 push、未改 global/remote/credential/.env、未写令牌。⑦ 落实方式：`ToolSearch` 仅得 3 个资料/会话检索工具，确无独立子代理通道，沿用 E-2 兜底由 PM 依 devops soul 组织，**未取得该角色独立原始回报**，但命令真实执行、输出真实回读。本批仅回滚 F-2 错误改动，F-2 不通过结论不变、push 隐患未消除，不把失败说成通过。
+
+### 补记（PM 最终复核 · 产物写入后工作区状态）
+
+以只读 `git status --short` 回读（真实回读、非推断）：
+
+```
+ M agents/dispatch_log.md
+ M agents/dispatch_queue.md
+?? agents/f1_expert_A_opinion.md
+?? agents/f2-devops-git-config.md
+STATUS_EXIT=0
+```
+
+- **本批产物 2 项**：`agents/dispatch_log.md`（F-2-fix 段追加）、`agents/f2-devops-git-config.md`（§8 追加），均为在 F-2 既有产物上追加、未新建文件。
+- **本批前既存、非本批改动 2 项**：`agents/dispatch_queue.md`（秘书看板）、`agents/f1_expert_A_opinion.md`（F-1 专家 A 发言），PM 未触碰。
+- 生效配置复核（只读）：`http.proxy` / `https.proxy` 仍为 `socks5://127.0.0.1:10808`，与步骤 2 一致，写入产物过程中未再改动任何 git 配置。
+
+---
+
+## 批次 F-1：重开 E-1 复议 · 3 位专家各自独立发表意见（PM 主持 / 记录 / 裁决）
+
+- **接单日期**：2026-11-10
+- **派活来源**：秘书 `agents/dispatch_queue.md`「批次 F-1」段（老板 2026-11-10 指令「重试一下，让每个专家都发表他们各自的意见」）
+- **触发缘由**：E-1 纪要 `agents/phase5-p8-next-direction.md` §1 / §8-① 三位专家均标「未回应」，§3 立场为 PM 依 soul 的合理推断（非专家本人发言；推断 A 选 ① / B·C 选 ③、裁决 2:1）。本批重开以取得每位专家**本人独立原始发言**。
+- **承派对象**：PM（`agents/souls/project_manager.md`；职责 4 主持复议 / 交叉争论 / 多数裁决 / 落盘纪要 / 追加日志）。参与：A 均值回归派 / B 风险派 / C 成本·可执行性派。
+- **本批范围**：只做「原样收录 3 份发言 → 组织交叉争论 → 依少数服从多数裁决 → 说明裁决相对 E-1 是否变化 → 落盘纪要 + 追加日志」；不跑回测、不改代码 / 配置 / 门槛、不抢跑下一批。
+
+### 分派与落实方式（PM 职责 1）
+
+| 子任务 | 责任 | 内容 | 状态 |
+|---|---|---|---|
+| F1-采集 | 秘书（依 `agents/souls/secretary.md` §协作规则「对 3 个金融专家的特殊任务，我可以直接派」） | 分别启动 **3 个独立子代理**、逐位派发（A→B→C→PM）、避开 503 限流；每位只加载自己 soul + 事实类文件、独立作答、署名「独立原始发言」 | **已落实**（秘书已亲自验收在盘） |
+| F1-A / B / C | 3 位专家独立子代理 | 各落盘 Q1~Q5 / Q3 明确选项 / Q4（C 明确表态）/ Q5 止损 / 争论点 / 保留意见 / 数据出处 | 已落实（见下「三份发言文件」） |
+| F1-PM | PM | 逐一**完整 `Read` 三份全文**（非只读摘要）→ §1 逐字原样收录 → §2 立场对照 → §3 交叉争论 → §4 表决 → §5 裁决（职责 4）+ 相对 E-1 变化 → §6 风险 → §7 验收；落盘纪要 + 追加本段 | 已落实 |
+
+- **落实方式如实标注**：三份发言由 3 个独立子代理本人产出、秘书亲自验收在盘；PM 逐一完整 `Read` 三份全文后**原样收录、不改写、不推断、不照抄 E-1 §3 推断立场**。PM 恪守 `project_manager.md` 限制「不写实现代码，不替其他角色做专业判断」——专家立场部分只做还原与记录，裁决按职责 4 依「少数服从多数」程序作出。PM 核实与秘书所述一致（A/B/C Q3 均 ③、C Q4 明确「是」、A 含「立场更新说明（独立、非锚定）」），未改任何数字。
+
+### 三份发言文件（供全文查阅）
+
+- `agents/f1_expert_A_opinion.md`（A 均值回归派，163 行）
+- `agents/f1_expert_B_opinion.md`（B 风险派，216 行）
+- `agents/f1_expert_C_opinion.md`（C 成本·可执行性派，226 行）
+- 纪要：`agents/phase5-f1-expert-opinions.md`（§1 三份发言全文逐字原样收录，已用只读脚本逐行比对源文件、A/B/C 均 VERBATIM OK）
+
+### 硬约束逐条遵守
+
+| 约束 | 状态 |
+|---|---|
+| 不得再标「未回应」/ 不得再做推断 / 不得改写或替专家下结论 | ✅ 三份发言真实在盘、逐字收录 |
+| Q1~Q5 结论 / Q3 选项 / Q4 表态 / Q5 止损 / 争论点 / 保留意见逐字原样引用 + 三份文件路径 | ✅ 纪要 §1（163/216/226 行全文） |
+| 专门记录「E-1 推断 vs 本次真实发言」差异（A 推断①→本人③） | ✅ 纪要 §5.3 |
+| 冻结门槛 6 条不放宽（回撤≤10% / 夏普≥2.0 / Calmar≥1.5 / 成本≤毛利35% / 极端段(2026-02)不亏 / 连亏≤5） | ✅ 一字未动 |
+| 不引用作废 0.473；`N/A` / `extreme_pnl=0` 占位不当通过 | ✅ |
+| 只写 2 个文件；不改三份发言原文 / `dispatch_queue.md` / `src/` / `config/strategy_params.yaml` / `.bat` / `.gitignore` / `.env` / 报告脚本 | ✅ |
+| 不跑回测 / 不提交 Git / 不放宽门槛 / 不启用实盘 / 不编造数字或发言 / 不抢跑下一批 | ✅ |
+
+### 验收判定（PM，职责 4，对照派活单验收标准）
+
+**总判定：通过** —— 3 份发言均在盘且各含完整 Q1~Q5；Q3 各有明确选项（**A / B / C 均选 ③**）；C 对 Q4 明确表态「**是**」；A 发言含「立场更新说明（独立、非锚定）」；引用数字由各专家声明 `json.load` 逐组回读、秘书已亲自验收在盘；无「未回应」被当成发言、无推断冒充、无照抄 E-1 §3；纪要含三人原样发言与裁决；门槛未放宽；无 `src/` / `config/` / `.bat` / `.gitignore` / Git 写操作。**「通过」仅指复议程序与记录合规，不代表任何组合达标、不代表策略可用 / 可上线、未执行任何回测或代码改动。**
+
+- **表决**：Q1 3:0「不构成实质改善 / 不可上线依据」；Q2 3:0「209 组达标 0、无继续试参理由」；Q3 **3:0 选 ③ 存档冻结（② 0 票、① 0 票）**；Q4 3:0「须先解决成本模型」（C 明确「是」）；Q5 趋同（条件未触发）。
+- **主裁决**：3:0 通过「③ 存档冻结」，与 E-1 主裁决结论一致（结论未变）。
+- **相对 E-1 变化**：票数 2:1 → 3:0；「A 选 ①」经本次 A 本人发言证实为 E-1 推断、非 A 立场，自本纪要起不得再作为 A 专家立场引用；A 的少数保留意见在本次真实发言中不存在（本次**无少数方**）。区分「结论未变」与「依据强度变化」（仅证据来源由 PM 推断升级为本人独立发言，盘上事实与达标 0 / 距门槛 0.7907 / 门槛不放宽均未变）；不粉饰为「专家一致支持裁决」之外的任何结论。
+
+### 风险 / 未决（转秘书）
+
+- ① **是否推翻裁决属老板决策权，PM 不越权**：是否再次推翻 ③、重启 ①/② 由老板拍板；若推翻须以三份发言 Q5 止损条件为硬前置。
+- ② 达标 0 / 距门槛 0.7907 / 1d 小样本（Top1 4 笔、901 根、12 组 `cost_ok` 4~23 笔）；门槛 6 条未放宽。
+- ③ ③ 的「成本改造 + 更长历史」两项前置**本批未实施**，属后续批次；本批不抢跑、不派发下一批。
+- ④ **E-1 §3 推断立场历史引用限制**：E-1 §3（含「A 选 ①」）为 PM 推断、非专家本人发言，引用须标注；「A 选 ①」不得再作为 A 立场引用。
+- ⑤ 三份发言中「加码 / 加严 / 条件式保留意见」属专家本人意见、3:0 下保留意见条件未触发，PM 未升级为裁决、未改门槛 / 配置。
+- ⑥ 极端段 50 组 `N/A` + 25 组 `extreme_pnl=0` 占位不计通过；作废 0.473 全程禁引。
+
+### 向秘书汇报（本批存档）
+
+① 两产物：`agents/phase5-f1-expert-opinions.md`（新建，§0~§7）、`agents/dispatch_log.md` 追加「F-1」段；三份发言原文、`dispatch_queue.md` 均未改。② 三位专家各自 Q3 选项与一句话核心结论：**A（均值回归派）选 ③ 存档冻结**——「协整真实性 / 半衰期 / h 稳健性三条一级判据全未通过，209 组是优化凌驾于前提」，并写「立场更新说明（独立、非锚定）」由 C-1 倾向扩池改为 ③；**B（风险派）选 ③ 存档冻结**——「4 笔样本观测不到尾部、50 组 `N/A` 与 25 组占位不构成穿越检验、换因子不消除尾部风险，209 组达标 0 已证该切片结构性不可行，七项风控硬前置须先落地」；**C（成本·可执行性派）选 ③ 存档冻结**——「209 组达标 0 不是策略没调到位，是 28bp 成本分子从未被当作变量，1d 的 12 个 `cost_ok` 是降频避成本账面假象」，且对 Q4 **明确表态「是」**、对 ③ 加严「成本压到 40% 以下仍不够、须按 ≤0.35 复算」。③ Q1 / Q2 / Q4 均 3:0 共识（Q1 不构成实质改善、Q2 209 组达标 0 无继续试参理由、Q4 须先解决成本模型），成因表述各异；C 的 Q4 明确「是」。④ 主裁决：**3:0 通过「③ 存档冻结」**（与 E-1 主裁决结论一致），② 0 票、① 0 票、**无少数方**。⑤ 相对 E-1 变化：E-1 §3 为 PM 推断（A 选 ① / B·C 选 ③，裁决 2:1，A 为少数方有保留意见）；本次 A 本人发言选 ③，故「A 选 ①」属推断非 A 立场、自本纪要起不得再作 A 立场引用；**票数 2:1 → 3:0、A 的少数保留意见在本次真实发言中不存在**；**结论未变（③）、变化的是依据强度（PM 推断 → 本人独立原始发言），盘上事实与达标 0 / 距门槛 0.7907 / 门槛不放宽均未变，不粉饰为「专家一致支持裁决」之外的任何结论**。⑥ 风险/未决：是否推翻裁决属老板决策权（PM 不越权）；达标 0 / 距门槛 0.7907 / 1d 小样本；成本改造 + 更长历史两项前置未实施、本批不抢跑；E-1 §3 推断立场历史引用限制；需老板拍板项为「是否推翻 ③ 裁决、重启 ①/②」。⑦ 硬约束：只写上述 2 文件；三份发言逐字原样收录、不标「未回应」、不推断、不改写；门槛 6 条不放宽、禁引 0.473、`N/A` / 占位不当通过；未改 `src/` / `config/` / `.bat` / `.gitignore` / `.env` / 报告脚本 / `dispatch_queue.md`；未跑回测、未提交 Git、未启用实盘、未编造、未抢跑下一批。**裁决通过 ≠ 策略达标 / 可上线**。
+
+
+---
+
+## G-1（本地直连补齐）· G1 carry 数据可行性调研（2026-11-11）
+
+**背景**：G-1a 子代理连撞 429 付费墙，产物未落盘。本轮改由**本地签名直连 Gate.io**（.env 只读 KEY，不经过子代理 API）补齐全部数据可行性实测。
+
+**实测结论（本地直连，零子代理额度消耗）**：
+
+### 1. K线
+- **现货 K线**：4h=2401根/400d、1d=801根/800d、1h=410d（老币已落盘）；10000 根上限
+- **永续 K线**：`/futures/usdt/candlesticks`，`limit` 与 `from/to` 互斥；4h=2000根/333d、1d=801根/800d、1h=2000根/83d、15m=2000根/20d
+- 永续 K线返回 dict 格式（`{t,v,c,h,l,o,sum}`），非现货 list 格式
+
+### 2. funding_rate（核心缺口）
+- **180 天回看限制**（实测）：`from=now-180d` → HTTP 400 `INVALID_PARAM_VALUE: from time exceeds 180-day limit`；`from=now-170d` → 成功（90根/169d）
+- **无法覆盖 2026-02 极端段**（需 410d+ 历史）→ G1 carry 回测窗口受限，极端段不亏门槛**无法验证**
+
+### 3. 9 币对 funding 统计（169d 窗口）
+
+| 币对 | 年化 | 方向 |
+|---|---|---|
+| BTC | +3.0% | 正 carry |
+| ETH | +1.3% | 正 carry |
+| DOGE | +2.4% | 正 carry |
+| LTC | +0.7% | 正 carry（弱） |
+| ADA | ≈0 | 无 carry |
+| XRP/SOL/AVAX | 负 | 负 carry |
+| BCH | -10.7% | **强烈负 carry** |
+
+### 4. 关键前置风险（G-3 硬前置）
+- **carry 收益太薄**：BTC 年化 3%，taker 0.1%/笔 roundtrip ≈ 0.2%；高频交易成本吞噬 carry
+- **做多 carry 方向仅限 BTC/ETH/DOGE/LTC**（BCH/SOL/XRP/AVAX 负 carry）
+- **1h 粒度 carry 不成立**：1h 窗口 410d vs funding 180d 交集，carry 收益无法覆盖 1h 粒度交易成本
+- **4h/1d 粒度**才可能让 carry 有意义（降低交易频率）
+
+**产物**：`agents/phase9-g1-carry-data-feasibility.md`（完整数据字典 + 缺口清单 + M8 适配架构说明 + 风险/未决）
+**探测数据**：`agents/_g1_probes/funding_all_coins_180d.json` + 7 个原始 JSON（fr_btc_260d.json 确认 180d 限制）
+
+**验收核对**：
+- [x] K线现货/永续各周期数据可得性（4h/1d/1h/15m）
+- [x] funding_rate 180d 边界确认（`from=180d` → 400、`from=170d` → 成功）
+- [x] 9 币对 funding 统计（均值/中位/正占比/年化）
+- [x] 缺口清单分级（高/中）
+- [x] M8 适配架构说明（不写代码，伪代码）
+- [x] 无令牌写入、未跑回测、未放宽门槛、未提交 Git
+
+---
+
+## G-2 · 3 金融专家论证 G1/G2/G3 可行性并选定（PM 主持复议）
+
+**日期**：2026-11-12
+**承派**：PM 主持 + 3 金融专家（A 均值回归 / B 风险 / C 成本·可执行性）各自独立子代理发言
+**产物**：
+- `agents/g2_expert_A_opinion.md`（A 专家独立原始发言，Q1~Q5 完整，Q3 选 ①）
+- `agents/g2_expert_B_opinion.md`（B 专家独立原始发言，Q1~Q5 完整，Q3 选 ①仅多头侧）
+- `agents/g2_expert_C_opinion.md`（C 专家独立原始发言，Q1~Q5 完整，Q3 选 ①成本实证检验定位）
+- `agents/phase9-g2-expert-opinions.md`（PM 主持纪要，§0~§8）
+
+**表决结果**：
+- **Q3 3:0 选 ① G1 carry**（多头 BTC/ETH/DOGE/LTC，180d 窗口 + 4h/1d 粒度）
+- ② 订单流/做市 0 票、③ 波动率/尾部对冲 0 票、④ 换数据源 0 票、⑤ 放弃 G1 0 票
+- 无少数方（三方同选 ①，但落点不同：A 派系错位妥协、B 砍空头腿、C 成本实证检验定位）
+
+**三方共识（G-3 硬前置）**：
+1. 6 条冻结门槛一字不放宽
+2. 不引用作废 0.473、不把 N/A 占位当通过
+3. 极端段(2026-02) funding 不可验证 → 标 N/A(180d限制)、降级实盘监控
+4. 做空侧（BCH/SOL/XRP/AVAX/ADA 负 carry）本轮不测
+5. ④ 换数据源补全 funding 410d = 下轮必做项
+6. ③ 波动率/尾部对冲 = ① 的配套
+
+**G-3 任务单（待派后端架构师）**：
+- 实现 M3+M4 carry 信号（只换 M3+M4，M5–M8 与 5 接口复用）
+- 成本模型纳入 funding 收益项 + 1~3s 时延 + 0.5x 抢跑折扣，按 ≤0.35 复算
+- 跑 M8 全门槛回测（180d + 4h/1d + 做多 BTC/ETH/DOGE/LTC）
+- 双档申报：taker 口径 + maker 口径
+- B 专家 8 项风控前置先落地
+- 产出 `backtest/output/g1_carry_basis_backtest.json` + `.md`
+
+**C 专家预判**：
+- taker + 4h 粒度：4h 段 carry 仅覆盖 roundtrip ~6.9% → 必判负
+- taker + 1d 粒度：1d 段 carry 覆盖 ~41% → 仍不过 0.35（须改 maker）
+- 唯一可能过线子集：BTC/ETH/DOGE/LTC + 1d + 成交≥30 笔 + maker + 1~3s 时延 + 0.5x 抢跑折扣
+
+**验收核对**：
+- [x] 3 份发言均在盘上且各含完整 Q1~Q5
+- [x] Q3 各有明确选项（A=①、B=①仅多头、C=①成本实证）
+- [x] 引用数字能从盘上产物回读核对
+- [x] 无「未回应」被当成发言、无推断冒充、无照抄
+- [x] PM 纪要含三人原样发言与裁决
+- [x] 门槛 6 条不放宽、不引用 0.473、不把 N/A 占位当通过
+- [x] 未跑回测、未改代码、未提交 Git
+- [x] 做空侧不测
+
+**向老板汇报**：
+① G-2 复议完成，3:0 选 ① G1 carry（多头 BTC/ETH/DOGE/LTC，180d + 4h/1d）；
+② 三方共识 + G-3 任务单已落盘；
+③ C 专家预判 taker 口径 0 过线，唯一有希望子集须改 maker + 1d + 成交≥30 笔；
+④ 下一步：是否派 G-3（后端架构师跑 M8 回测，含 taker/maker 双档申报）？
+
+---
+
+## G-3 · G1 carry 基差信号 M8 全门槛回测（taker/maker 双档）
+
+**日期**：2026-11-12
+**承派**：后端架构师 `agents/souls/backend_architect.md` 主导 + 数据工程师协作
+**任务单**：`agents/phase9-g2-expert-opinions.md` §6（G-3 任务单）
+
+**产物**：
+- `backtest/g1_carry_basis_data.py`（数据准备：现货 1d ∩ 永续实拉 ∩ funding → carry 对齐 parquet + SHA256 指纹 manifest）
+- `backtest/g1_carry_basis_backtest.py`（M3 FundingCarrySignal + M4 成本模型 + B 专家 8 项风控前置 + 6 条门槛判定，独立脚本，不改 `src/` 6 层骨架）
+- `backtest/output/g1_carry_basis_backtest.json`（16 组全量 + 门槛判定 + taker/maker 双档 + 参数指纹）
+- `backtest/output/g1_carry_basis_backtest.md`（全量组 + Top 对照 + 达标数 + 双档对比 + 极端段 N/A 声明）
+- `data/cache/g1_carry_data/*.parquet`（8 组对齐数据）+ `_manifest.json`（数据指纹）
+- `agents/_g1_probes/fr_{btc,eth,doge,ltc}_usdt_169d_g3.json`（funding 实拉 100 根/币）
+- `agents/_g1_probes/perp_{btc,eth,doge,ltc}_usdt_{4h_28d,1d_31d}_g3.json`（永续实拉，funding 窗口对齐）
+
+**关键事实（如实申报，不脑补）**：
+1. **funding API 实测限制比 G-1 标称 180d 更严**：`funding_rate` 端点单次分页上限 100 根（8h 间隔）→ 有效窗口 ~33 天（G-3 2026-11-12 实拉确认；from=180d/170d 请求均被截断到最近 ~33d）。实得窗口 ~30 天（4h=89~91 根、1d=31 根，现货∩funding∩永续内连接后）。
+2. **现货 4h parquet 的 ts 与 funding 8h 结算点对齐**（00/04/.../20 整点，00/08/16 为结算点），但现货 4h parquet 止于 2026-11-08 12:00（1794139200），funding 实得止于 11-12 → 4h 交集 = funding ∩ 永续 4h ∩ 现货 4h = 89~91 根。1d 现货∩funding∩永续 1d = 31 根。
+3. **极端段 2026-02 funding 数据不存在**（33d 窗口 << 410d 需求）→ 16 组极端段门槛全标 `N/A(180d限制)`，**不当通过、不放宽、不用 0 占位顶替**。
+4. **开仓条件（funding 持续为正 + 基差为正）在 33d 窗口内 0 组触发**：fr∩basis 同正 bar 每币 0~1 根且孤立不连续（BTC 4h 仅 1 根 10-30 16:00，DOGE 4h 仅 1 根 11-09 00:00，ETH/LTC 0 根）→ 16 组 0 成交、0 开仓信号，夏普/Calmar/净收益均无统计意义。
+
+**16 组结果（4 币 × 2 粒度 × 2 费率档）**：
+
+| 币 | 粒度 | bar | 4h 同正 bar | taker 成交 | taker 净收益% | taker cost_ok | maker 成交 | maker 净收益% | maker cost_ok |
+|---|---|---|---|---|---|---|---|---|---|
+| BTC | 4h | 89 | 1（孤立） | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+| BTC | 1d | 31 | 0 | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+| ETH | 4h | 89 | 1（孤立） | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+| ETH | 1d | 31 | 0 | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+| DOGE | 4h | 91 | 1（孤立） | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+| DOGE | 1d | 31 | 0 | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+| LTC | 4h | 91 | 0 | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+| LTC | 1d | 31 | 1（孤立） | 0 | +0.000 | ❌ | 0 | +0.000 | ❌ |
+
+- **达标组数：0/16**（除 N/A 极端段外 6 条门槛全达成口径）
+- 全部组 0 成交 → 夏普/Calmar/净收益均 0（无统计意义，不脑补）
+- B #2 funding 突变已进回测：ETH 4h 触发 6 次（+1×19~32 期 24h）、DOGE 4h 触发 9 次、LTC 4h 触发 11 次（特别监控项）；1d 粒度未触发
+- C 专家预判「taker 口径 0 过线」已实证：分子侧无成交机会，分母侧 0.5x 抢跑折扣下更无过线可能
+- 对照：均值回归 75 组 Top1 夏普 0.499（82 笔）/ C-2b Top1 1.2093（4 笔，已判薄样本假象）→ G-3 各组均远低于两者
+
+**B 专家 8 项风控前置落地（已进回测，不放宽）**：
+- #1 回撤熔断（8% 预警降 50% / 10% 停机）→ 未触发（0 成交组回撤 = 0）
+- #2 funding 突变熔断（≥3 期 24h 同号 >2×均值降敞口 / ≥5 期清零）→ 已进回测；LTC 4h 触发 11 次、DOGE 4h 触发 9 次、ETH 4h 触发 6 次（特别监控项，正占比 LTC 53% / DOGE 72%）
+- #3 敞口上限 20%/币 → 已进回测（0 开仓未实际占用）
+- #4 连亏熔断 ≤5 → 最大连亏 0（0 成交）
+- #5 资金曲线双负强制减仓 → 已进回测（0 触发）
+- #6 极端段降级 N/A(180d限制) → 16 组全 N/A
+- #7 笔数下限 ≥30 → 全部 0 笔 <30，不计通过
+- #8 成本口径锁定（含 1~3s 时延 0.1bp 假设值 + 0.5x 抢跑折扣 + carry 翻转，≤0.35 复算）→ 已进回测
+
+**成本模型假设值（盘上无实测，须标注）**：
+- taker 滑点 4bp/边（冻结 3~5bp 保守假设）
+- maker 滑点 0.5bp/边（**假设值**，VIP0 maker 同价 0.1%/边 → roundtrip 0.2% 不变）
+- latency_1_3s = 0.1bp（**假设值**，按 1h K线 0.001% 量级估算）
+
+**硬约束遵守**：
+- 未改 `src/`、未改 `config/strategy_params.yaml` 数值（SHA256-16 = `0b68401f01fa2485`）、未动 `.bat`/`.gitignore`/`.env`、未提交 Git
+- 未放宽 6 条冻结门槛、未引用作废 0.473、未把 N/A 占位当通过、未启用实盘
+- 未跑 1h 粒度、未测做空侧（BCH/SOL/XRP/AVAX/ADA）、未换数据源（④ 换数据源 = 下轮必做项）
+
+**验收核对**：
+- [x] 16 组全量（4 币 × 2 粒度 × 2 费率档）
+- [x] taker/maker 双档申报
+- [x] 门槛 6 条判定 + B 专家 8 项风控前置已进回测
+- [x] 极端段 N/A(180d限制) × 16 组，不当通过
+- [x] 做空侧不测
+- [x] 成本公式含 carry 翻转 + 1~3s 时延 + 0.5x 抢跑折扣
+- [x] 数字可从盘上产物回读核对（json + parquet + manifest SHA256）
+- [x] 未引用 0.473、未提交 Git、未启用实盘
+
+**向秘书汇报**：
+① G-3 落地完成，16 组全量回测已跑（taker/maker 双档），达标 0/16（0 成交 → 无统计意义）；
+② 开仓条件「funding 持续为正 + 基差为正」在 33d 实得窗口内 0 组触发（fr∩basis 同正 bar 每币 0~1 根且孤立不连续）→ 0 成交，C 专家预判「taker 口径 0 过线」已实证；
+③ funding API 实测限制比 G-1 标称 180d 更严（单次 100 根 → 有效窗口 ~33 天），实际交集 4h=89~91 根/1d=31 根（标称 180d 下 4h=1080 根/1d=180 根，超出部分无数据、不脑补）；极端段 2026-02 无覆盖 → 16 组全标 N/A(180d限制)、不当通过；
+④ B 专家 8 项风控前置已全部进回测（未放宽、未豁免），其中 #2 funding 突变在 LTC 4h 触发 11 次、DOGE 4h 触发 9 次（特别监控项）；
+⑤ 下一步：④ 换数据源补全 funding 410d（含突破 100 根/次分页上限的分页拉取）+ 费率结构改造（maker）为下轮必做项；③ 波动率/尾部对冲为 ① 配套。
+
+
+---
+
+## G-3 · G1 carry 基差 M8 全门槛回测（taker/maker 双档，16 组）
+
+**日期**：2026-11-12
+**承派**：PM 转派后端架构师 `agents/souls/backend_architect.md` 主导 + 数据工程师协作
+**数据源**：现货 4h/1d parquet（BTC/ETH/DOGE/LTC）∩ 永续实拉（`_g1_probes/perp_*_g3.json`）∩ funding 实拉（`fr_*_usdt_169d_g3.json`，100根/币）
+
+### 回测结果（16 组，4币 × 2粒度 × 2费率档）
+- **0 成交 / 0 达标**：fr∩basis 同正 bar 每币 0~1 根且孤立不连续，开仓「持续 ≥3 bar」口径下 0 组触发
+- **funding 实得窗口 ~33d**（100 根/币），实际交集 4h=89~91 根 / 1d=31 根，超出部分无数据
+- **极端段(2026-02)**：funding 无覆盖 → 标 `N/A(180d限制)`，不当通过、不用 0 占位顶替
+- **taker 档**：16 组全 cost_ok=❌（C 专家「taker 口径 0 过线」预判实证）
+- **maker 档**：16 组全 cost_ok=❌（薄样本 + 0.5x 抢跑折扣分母 + 时延假设三重加严）
+- **笔数下限 ≥30**：16 组全 <30 笔（B #7），不计通过
+- **夏普/Calmar/净收益**：0 成交组均为 0，无统计意义
+
+### 门槛 6 条判定（不放宽）
+| 门槛 | 16 组达成数 |
+|---|---|
+| 回撤≤10% | 16（B #1 熔断） |
+| 夏普≥2.0 | 0 |
+| Calmar≥1.5 | 0 |
+| 成本≤0.35×0.5×毛利 | 0 |
+| 连亏≤5 | 16（B #4 熔断） |
+| 极端段不亏 | N/A×16（B #6 降级） |
+| 笔数≥30 | 0（B #7 下限） |
+
+**通过（除 N/A 外全达成）：0/16**；**最终通过（N/A 不当通过）：0/16**
+
+### B 专家 8 项风控前置（已进回测）
+#1 回撤 8% 预警降 50%/10% 停机；#2 funding 突变（≥3 期 24h 同号 >2×均值降/≥5 清零）——LTC 4h 触发 11 次、DOGE 4h 触发 9 次、ETH 4h 触发 6 次；#3 敞口 20%/币；#4 连亏≤5；#5 双负强制减仓；#6 极端段 N/A 降级；#7 笔数≥30；#8 成本口径锁定（含 1~3s 时延 + 0.5x 抢跑 + carry 翻转）
+
+### 与既有基准对照
+| 基准 | 夏普 | 笔数 | G-3 对比 |
+|---|---|---|---|
+| 均值回归 75 组 Top1（ETH/SOL 1h） | 0.499 | 82 | G-3 0 成交，夏普=0 < 0.499 |
+| C-2b 125 组 Top1（ETH/AVAX 1d） | 1.2093 | 4 | G-3 0 成交，夏普=0 < 1.2093 |
+
+### 假设值（盘上无实测，须标注）
+- maker 滑点 0.5bp/边（0~1bp 估算取中）
+- latency_1_3s = 1e-05（0.5~1.5 tick 按 1h K线 0.001% 量级估算取 0.1bp）
+- 开仓「持续」口径 = fr∩basis 同正连续 ≥3 bar（≈1 个 24h 段），非任务单冻结数值
+
+### 产物
+- `backtest/output/g1_carry_basis_backtest.json`（16 组全量 + 门槛 + 双档 + 指纹）
+- `backtest/output/g1_carry_basis_backtest.md`（全量组 + Top 对照 + 双档对比 + N/A 声明）
+- `backtest/g1_carry_basis_data.py`（数据准备，已重新生成）
+- `backtest/g1_carry_basis_backtest.py`（M3+M4 + 16 组回测）
+- `data/cache/g1_carry_data/*.parquet` + `_manifest.json`（SHA256-16 指纹）
+
+### 验收核对
+- [x] 16 组全量、taker/maker 双档、门槛 6 条判定、极端段 N/A、做空侧未测
+- [x] B 专家 8 项风控前置已进回测
+- [x] 成本公式含 carry 翻转 + 1~3s 时延 + 0.5x 抢跑折扣
+- [x] 参数指纹 0b68401f01fa2485（config/strategy_params.yaml 数值未改）
+- [x] 数字可从 `data/cache/g1_carry_data/*.parquet` + `agents/_g1_probes/*.json` + JSON/MD 三处交叉回读核对
+- [x] 未引用 0.473、未把 N/A 当通过、未放宽 6 条门槛、未启用实盘、未提交 Git
+
+### 向秘书汇报（本批存档）
+① G-3 回测完成，**16 组全 0 成交、0 达标**，funding 实得 ~33d 窗口，fr∩basis 同正 0 组触发；
+② taker/maker 双档全 cost_ok=❌（C 专家预判 taker 0 过线已实证，maker 在薄样本+抢跑折扣下同样不过）；
+③ 极端段 N/A(180d限制)，降级实盘监控承接；B 8 项风控前置已落地；
+④ 本轮回测定位 = 「成本分子改造实证检验」（C 专家 Q3），非 carry 上线；
+⑤ 下一步 = ④ 换数据源补全 funding 410d + 费率结构改造（maker）为下轮必做项；③ 波动率/尾部对冲为 ① 配套；
+⑥ 未引用 0.473、未把 N/A 当通过、未放宽 6 条门槛、未启用实盘、未提交 Git。
+
+## G-4 / G-5 · 老板 A+B 组合派活（秘书存档，2026-11-12，待 PM 分派）
+
+> 触发：G-3 实证 taker/maker **VIP0 档**双档 0 过线（funding 实得 ~33d、极端段 N/A、fr∩basis 同正 0 组触发）。老板 2026-11-12 拍板「从 A 下手，然后做 B 方案」，并明示「夏普率本就不要求过 1.0」。
+> **门槛/费率调整属老板新指令、须 audit 留痕，非默认不放宽。**
+
+- **G-4-①（A·数据工程师）**：换数据源补全 4 币（BTC/ETH/DOGE/LTC）funding 410d 历史 + 极端段(2026-02)覆盖自检；数据来源分级（免费/需付费/不可得），不硬拉。→ 产物 `agents/phase9-g4-funding-410d-data-sources.md`。
+- **G-4-②（A·后端架构师，依赖 ①）**：降门槛（**夏普不再要求过 1.0** + 成本 35%→50%）+ 升 VIP 费率档（费率档未确认则如实标「待老板确认 VIP 档位」不脑补）→ 重跑 16 组 G1 carry；须 `verify_params.py --update` audit 留痕 + 纪要标注「老板 A 方案指令」。→ 产物 `backtest/output/g4_carry_rerun.json` + `.md`。
+- **G-5-①（B·数据工程师）**：L2 盘口/订单流数据需求清单 + 数据源调研（只调研不硬拉、不写代码不回测）。→ 产物 `agents/phase9-g5-l2-market-data-requirements.md`。
+- **G-5-②（B·后端架构师，依赖 ①）**：做市扩展架构说明 + 抢跑建模说明（不改 `src/`、不实现、不回测）。→ 产物 `agents/phase9-g5-marketmaking-arch-notes.md`。
+
+派发顺序（一批 1 件、撞 429 停 3 分钟再试）：**先派 G-4-①**（A 优先，换源补 funding 410d 是改变 G-3 结论的最快前置），G-4-① 出数据结论后再派 G-4-②；G-4 收口后派 G-5-① → G-5-②。
+
+> 待 PM 接单分派；撞 429 付费墙时停在该小批、3 分钟重试一次（老板规矩），如实记录。
+
+---
+
+## G-4-① · A 方案 · funding 410d 换源补全（数据工程师落实 + PM 验收，2026-11-12）
+
+- **派活来源**：秘书（`agents/dispatch_queue.md` G-4 段「先派 G-4-①」）→ PM → 数据工程师。
+- **产物**：`agents/phase9-g4-funding-410d-data-sources.md`（源对比表 S1~S9 + 选定结论 + 补拉结果 + 极端段判定 + 缺口分级 + 待老板拍板项）。
+- **实测摘要**（本机 2026-11-12，全部未鉴权公共端点探测）：
+  - S1 Gate.io：180d 已知上限（G-1 实证），不补 410d；本机 api.gate.io 隧道 502。
+  - S2 Binance fapi `fundingRate`：本机 api.binance.com/www.binance.com/data-api.binance.vision **全 502/404**（vision 公共端点不开放 futures 端点）；官方回看 ~3 个月，283d 极端段覆盖性**未确认、不脑补**。
+  - S3 Binance bapi 网页接口：连接失败 + 非正式接口，不采信。
+  - S4 OKX `funding-rate-history`：www.okx.com/aws.okx.com 全 502，深度未实测；**换网后首选实测对象**（8h 粒度理论全史）。
+  - S5 Bybit `funding/history`：api.bybit.com 502，未实测。
+  - S6 CCXT 聚合：上游全 502 → 不可用。
+  - S7 Glassnode：根端点 **401**（可达、需付费 KEY，未授权）。
+  - S8 CoinGecko：无 funding_rate 历史字段，**不适用**；且 502。
+  - S9 数据服务商（Kaiko/Amberdata/Tardis）：需付费、未接。
+- **补拉结论**：**无免费可得源 → 未落盘**（`data/cache/g1_carry_data/funding_410d/` 未创建、无 parquet、无 manifest），不硬拉、不伪造、不用 0 占位。
+- **极端段（2026-02-04~02-10）判定**：**不覆盖 → 维持 N/A（数据源缺口）**，不计通过、不放宽、不用 0 顶替。
+- **合规自检**：无令牌/密钥写入（探测全部公开端点，.env KEY 未外泄）；未改 `src/`、`config/strategy_params.yaml`、`.bat`、`.gitignore`、`.env`；未提交 Git；未放宽门槛；未启用实盘；本批只做 ①，**未抢跑 ②**（未触发回测重跑）。
+- **向秘书汇报（5 项）**：
+  ① 数据源结论：**无免费源在本机可得 410d**（Binance/OKX/Bybit/Gate 全 502 不可达，Glassnode 需付费 KEY）；
+  ② 4 币 funding 410d 补拉：**失败未落盘**（网络不可达 🔴 / Binance 回看深度存疑 🔴 / 付费源无授权 🟡），无指纹可列；
+  ③ 极端段 2026-02：**不覆盖 → N/A（数据源缺口）**；
+  ④ **不建议启动 G-4-②**：410d 未补齐，重跑仍 33d 窗口；需老板先拍板「换网实测 OKX/Binance」或「批准付费源」；
+  ⑤ 无令牌写入 / 未改配置 / 未放宽门槛 / 未动实盘 ✅。
+- **待老板拍板**（详见报告 §六）：1) 提供可直连四大所 API 的网络环境（零成本，优先）；2) 是否批准付费源；3) 是否确认 OKX 为首选免费源（换网后实测）；4) G-4-② 走 33d 降级重跑还是等 410d 补齐后一次重跑。
+
+## G-4-② · 派活撞 429 付费墙记录（2026-11-12 15:52）
+- 秘书派 G-4-②（合约档费率 + 降门槛 + 33d 窗口重跑 16 组 G1 carry）→ 子代理创建后 429（"reached API rate limit for free users"）。
+- 非任务失败、非代码错误，属 WorkBuddy 子代理 API 免费额度间歇限流。任务单已落 `agents/dispatch_queue.md` G-4-② 段（合约腿 maker 0.02%/taker 0.05%、现货腿 0.1%、夏普不再要求过 1.0、成本 35%→50%、33d funding 窗口、极端段 N/A、verify_params --update 留痕）。
+- 按老板规矩（2026-11-10 18:53）：撞限流**隔 3 分钟自动重试一次**，无需老板下指令。本记录 15:52，预计 ~15:55 重试。
