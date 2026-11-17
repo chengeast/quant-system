@@ -3182,3 +3182,24 @@ I-8 六类产出 + 日志段落盘，阶段一复权"拿到且验证通过"（�
 **待老板拍板项**：① 是否接受 I-10 结果口径（0 达标、买入时点变化 4 规则均值全部小幅转正）；② 是否后续批次将 I-10 口径固化为统一成交规则（替代 I-8 口径）；③ G-6-③ 提交 Git 时 I-10 产物是否一并纳入（本批未提交）。
 
 **执行体如实登记**：本环境为**单一执行体、非两角色独立会话**；按 `project_manager.md` 纪律 PM 直接落实 + 验收 + 落盘 + 回报秘书，PM 只做编排、盘上事实复核与可验证性验收，不替工程师做专业判断；T+1 违规 10 笔、0 达标均为**实测/如实申报，未脑补 0、未美化**。
+
+## G-6-③-Git · 老板 17:09 拍板④「你安排立即提交」落实（秘书直接执行，2026-11-17 18:2x）
+**性质**：Git 提交动作由秘书直接执行（D-2/F-2 惯例中 PM 执行提交，本批为纯提交动作、无代码/数据改动，秘书不越界改业务文件，仅 git 操作 + 本段留痕）。
+
+### 提交内容（对照拍板④「立即提交」）
+- **commit `918eba5`**（本地）：「第十二轮：I 线 A 股批次（I-1~I-10）+ G-4/F-1/G-5/G-6 已验收产物补交」
+- 暂存 135 文件（`git diff --cached --name-only` 逐项核对、**非 `git add .` 盲提**）：
+  - 4 M：`config/strategy_params.yaml`（G-4-② 降门槛留痕 diff +33/−8，老板已审批指令）、`backtest/g1_carry_basis_backtest.py`、`agents/dispatch_log.md`、`agents/dispatch_queue.md`
+  - 47 未跟踪（提交前基线）→ 放开 `backtest/output/` 后共 **130 未跟踪**：`agents/phase9-*` I/G 线 18 份、`agents/h1_expert_{A,B,C}_opinion.md`、`backtest/i8_*`/`i9_*`/`a_share_*`/`g4_*`/`tdx_a_share_*` 脚本 24 个、`backtest/output/` 93 个文件（**总 293.8MB**，含 5 份逐笔 trades json 最大 67MB；I-10 的 59.8MB 逐笔含在内）
+- **`.gitignore` 改动（留痕）**：放开 `!backtest/output/`、`!backtest/output/**`、`!backtest/output/*.log`；`data/cache/`、`.env`、`*.key`、`*.parquet`、根级 `*.log` **维持忽略未动**。
+- **敏感终检**：暂存清单 0 敏感文件（无 .env/密钥/secrets/credentials/data-cache）；`backtest/output/` 全目录密钥明文正则扫描 0 命中；`i9_keysearch.log` 内容核实仅「SELFTEST 通过 + scan hits=0」3 行、无密钥。
+- **范围核实**：I-1~I-10 + G-4-②/④⑤ + G-5/G-6 + F-1/H-1 全部**已验收批次**产物；无未验收产物混入（I-10 已验收、纳入合规）。
+
+### push 结果（如实申报，不硬试）
+- `git push origin main` **3 次失败**：本地代理 `socks5://127.0.0.1:10808` 生效（与 F-2 同链），push 传输阶段被 120s 超时 SIGTERM 终止（输出为空、EXIT=1）；规范化 remote URL 后仍同失败。
+- **对照**：`git ls-remote` EXIT=0（轻量可达、远端 HEAD `cde835f` 未变）→ 通道半通（读可达、大传输 295MB 被代理/超时截断）；**非凭据失败**（GCM 弹窗未触发、无 auth 报错），主因 = 本地代理对大传输体不可靠。
+- 本地 `main` **领先 `origin/main` 1 commit**（`918eba5`，`rev-list --count` = 1）。
+- **按既有闭环口径（D-2/F-2 惯例）：push 失败不重试不绕过、报老板手动推送**。老板 17:09「你安排立即提交」= 安排提交动作，**提交已完成（`918eba5` 在本地 main）**；推送沿用老板手动闭环。
+
+### 合规
+- 本段仅 git 提交/推送动作 + `.gitignore` 两处放开（留痕）+ 本日志段；**未改 src/、未改 config 内容（仅随已验收 diff 提交）、未改业务代码、未放宽门槛、未启实盘**；0 次 429/503。
