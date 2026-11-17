@@ -1,0 +1,7 @@
+login success!
+[delisted] 342 只退市股入列
+[plan] targets=342 todo(remaining)=332 limit=ALL
+[progress] 1/332 done | elapsed 7s | rate 0.15/s | ok=11 fail=0
+[progress] 20/332 done | elapsed 480s | rate 0.04/s | ok=30 fail=0
+[progress] 40/332 done | elapsed 771s | rate 0.05/s | ok=50 fail=0
+[progress] 60/332 done | elapsed 1114s | rate 0.05/s | ok=70 fail=0

@@ -1,0 +1,661 @@
+{
+  "batch": "I-1",
+  "phase": "阶段二 · 回测程序",
+  "role": "backend_architect",
+  "generated_at": "2026-11-15T09:16:33.399537+00:00",
+  "meta": {
+    "script": "backtest/a_share_m8_rerun.py",
+    "old_scripts_untouched": true,
+    "src_untouched": true,
+    "config_untouched": true,
+    "data_fingerprint": {
+      "manifest_sha256_16": "fe1cacc389f04926",
+      "adjustment_conclusion": "无法可靠复权",
+      "files": {
+        "sh000001": {
+          "source_sha256_16": "82588c1dd14011ee",
+          "parquet_sha256_16": "e815bf2a79b9d51e",
+          "n_bars": 6824
+        },
+        "sh000300": {
+          "source_sha256_16": "8727821971cf2e86",
+          "parquet_sha256_16": "a970e93ed0e134f6",
+          "n_bars": 5309
+        },
+        "sh510300": {
+          "source_sha256_16": "c526a72d69507444",
+          "parquet_sha256_16": "372cab173c5339f2",
+          "n_bars": 3515
+        },
+        "sh600000": {
+          "source_sha256_16": "c287bef791a2849b",
+          "parquet_sha256_16": "581b73e0f250564f",
+          "n_bars": 6427
+        },
+        "sz000001": {
+          "source_sha256_16": "868efb54d2310550",
+          "parquet_sha256_16": "cfd4bab1de2d5a8b",
+          "n_bars": 6661
+        },
+        "sz399001": {
+          "source_sha256_16": "0f9aab32d9380f3c",
+          "parquet_sha256_16": "b0e08267847996b2",
+          "n_bars": 6824
+        }
+      }
+    },
+    "param_fingerprint": {
+      "file": "config\\strategy_params.yaml",
+      "sha256": "31fbb054cddb55af6d95c7f200644ac4c80436ff91316924dc1e6e95a526d5f9",
+      "sha256_16": "31fbb054cddb55af"
+    },
+    "gate": {
+      "max_drawdown_pct": 10.0,
+      "min_sharpe": null,
+      "min_calmar": 1.5,
+      "max_consecutive_losses": 5,
+      "extreme_window": "2026-02",
+      "extreme_window_start": 1770163200,
+      "extreme_window_end": 1770681600,
+      "max_cost_as_pct_of_gross": 0.5
+    },
+    "sharpe_gate": "不设硬门槛（min_sharpe=null；判定 6 条退化为 5 条）",
+    "gate_note": "以 config/strategy_params.yaml 现行值为准；与 phase9-h1 §0.2 『历史讨论基线 夏普≥2.0 / 成本≤35%』区分记录，不混淆、不放宽、不回滚",
+    "assumption_label": "待老板确认的假设",
+    "a_share_cost": {
+      "_label": "待老板确认的假设",
+      "_note": "以下为项目假设 / 公开费率的单一代表值，均未经交易所对本账户核实；A 股历史费率多次调整（印花税 2008/2023、过户费 2022 等），本批不分段回溯，统一用单一代表值并标注。绝不套用 Gate.io 现货 0.1%/边。",
+      "commission": {
+        "value_pct_per_side": 0.00025,
+        "display": "万2.5（0.025%）/边，双边收",
+        "nature": "项目假设",
+        "label": "待老板确认的假设"
+      },
+      "stamp_duty": {
+        "value_pct_sell_only": 0.0005,
+        "display": "卖出单边 0.05%（2023-08-28 起减半后档）",
+        "nature": "交易所/财政部公开税率，但历史多次变动；本批取单一现行代表值",
+        "label": "待老板确认的假设"
+      },
+      "transfer_fee": {
+        "value_pct_per_side": 1e-05,
+        "display": "0.001%（0.01‰）/边，双边收（2022-04-29 起沪深统一档）",
+        "nature": "交易所公开费率，但历史沪深不一致；本批取单一现行代表值",
+        "label": "待老板确认的假设"
+      },
+      "slippage": {
+        "value_bps_per_side": 5.0,
+        "display": "5bp/边",
+        "nature": "项目假设（盘上无 A 股历史盘口实测；src/core/market_ifaces.py BrokerAdapter 注释『A股 0.3-0.5%』为架构占位口径，未实测、不硬套）",
+        "label": "待老板确认的假设"
+      }
+    },
+    "cost_per_roundtrip_yuan": 2.02,
+    "cost_roundtrip_bp_vs_total_notional": 20.2,
+    "no_gateio_fee_applied": true,
+    "gateio_note": "未套用 Gate.io 现货 0.1%/边 / roundtrip 28bp（phase7 仅适用加密现货主线）",
+    "adjustment_limit": "无法可靠复权",
+    "result_not_upper_line_evidence": true,
+    "extreme_gate": "PENDING_BOSS_DECISION",
+    "extreme_gate_note": "冻结门槛 2026-02 是加密崩盘段；A 股改用哪段属老板拍板。本批仅多段敏感性对照列建议表，冻结判定单列待拍板，不得把 N/A 当通过、不得用 0 占位顶替。",
+    "skeleton_reuse": {
+      "M3": "src/signal_layer/mean_reversion_signals.py MeanReversionSignals（60bar 收益率 OLS / [0.5,2.0] / INVALID / spread=lnA−h·lnB）",
+      "M4": "src/decision_layer/mean_reversion_strategy.py StrategyRules + MeanReversionStrategy.decide()（|z|≥entry 开仓 / 三线并行先到先平 / 相对开仓点 σ / 超时 max(3h,1.2H,bars)）",
+      "R4": "bar t 收盘出信号 → bar t+1 open 成交（防未来函数）",
+      "timeframe": "resolve_timeframe('1d', hours_per_day=4, trading_days_per_year=252) → bars_per_year=252（A 股已预留）",
+      "p1_degraded_note": "骨架 P1：h 越界先重估钳制 DEGRADED（可交易），重估失败才 INVALID；本脚本复用原语义，不改写骨架"
+    }
+  },
+  "summary": {
+    "n_groups": 3,
+    "n_passed_final": 0,
+    "n_passed_final_reason": "0 达标如实申报：极端段冻结判定『待老板拍板』使第 5 条未闭合，任何组不能判『最终达标』；且本批未复权、结果非可上线依据。不与加密 257 组混算。",
+    "data_fingerprint": "fe1cacc389f04926",
+    "param_fingerprint": "31fbb054cddb55af",
+    "assumption_label": "待老板确认的假设",
+    "adjustment_limit": "未复权（无法可靠复权）",
+    "extreme_gate": "PENDING_BOSS_DECISION"
+  },
+  "groups": [
+    {
+      "id": "IDX_PAIR",
+      "pair": "sh000001×sz399001",
+      "leg_a": "sh000001",
+      "leg_b": "sz399001",
+      "kind": "index×index",
+      "corporate_action_risk": "none",
+      "reason": "双宽基指数（上证综指×深证成指）：指数点位序列无除权、无退市，1998-09-15~2026-11-13 各 6824 根全样本对齐最好；复权结论对其不敏感 → 主组。",
+      "n_bars": 6824,
+      "start_date": "19980915",
+      "end_date": "20261113",
+      "n_trades": 28,
+      "gross_total": 4.7542,
+      "cost_total": 56.56,
+      "cost_gross_ratio": 11.8968,
+      "cost_ok": false,
+      "total_return": -0.005181,
+      "max_dd": 0.008573,
+      "calmar": -0.0224,
+      "sharpe": -0.1527,
+      "max_consec_losses": 3,
+      "gates": {
+        "1_max_drawdown_le_10pct": true,
+        "2_calmar_ge_1p5": false,
+        "3_cost_le_50pct_of_gross": false,
+        "4_max_consec_losses_le_5": true,
+        "5_extreme_not_loss": "PENDING_BOSS_DECISION",
+        "sharpe_hard_gate": "不设硬门槛（min_sharpe=null）",
+        "min_trades_ge_30": false
+      },
+      "decidable_4plus_trades_pass": false,
+      "passed_final": false,
+      "passed_final_reason": "极端段冻结判定『待老板拍板』，第 5 条未闭合；不得把 N/A 当通过、不得用 0 占位 → passed_final=False（如实）",
+      "trades_sample": [
+        {
+          "entry_bar": 84,
+          "exit_bar": 87,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": -3.7339,
+          "cost": 2.02,
+          "net": -5.7539,
+          "entry_date": "19990114",
+          "exit_date": "19990119"
+        },
+        {
+          "entry_bar": 104,
+          "exit_bar": 113,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": 3.4924,
+          "cost": 2.02,
+          "net": 1.4724,
+          "entry_date": "19990302",
+          "exit_date": "19990315"
+        },
+        {
+          "entry_bar": 420,
+          "exit_bar": 426,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": 1.2993,
+          "cost": 2.02,
+          "net": -0.7207,
+          "entry_date": "20000620",
+          "exit_date": "20000628"
+        },
+        {
+          "entry_bar": 806,
+          "exit_bar": 851,
+          "reason": "timeout",
+          "state": "SHORT_SPREAD",
+          "gross": -2.7226,
+          "cost": 2.02,
+          "net": -4.7426,
+          "entry_date": "20020122",
+          "exit_date": "20020409"
+        },
+        {
+          "entry_bar": 2489,
+          "exit_bar": 2494,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": -4.6154,
+          "cost": 2.02,
+          "net": -6.6354,
+          "entry_date": "20090108",
+          "exit_date": "20090115"
+        }
+      ],
+      "adjusted": false,
+      "adjustment_limit": "未复权（阶段一结论：无法可靠复权）；结果不得写成『可上线依据』"
+    },
+    {
+      "id": "IDX_ETF",
+      "pair": "sh000300×sh510300",
+      "leg_a": "sh000300",
+      "leg_b": "sh510300",
+      "kind": "index×ETF",
+      "corporate_action_risk": "etf_dividend_residual",
+      "reason": "沪深300 指数×沪深300ETF：同一标的的现货/基金腿，基差收敛逻辑最贴近配对均值回归；ETF 有分红除息 residual（🟡 显式标注），2012-05-28 起样本较短。",
+      "n_bars": 3515,
+      "start_date": "20120528",
+      "end_date": "20261113",
+      "n_trades": 12,
+      "gross_total": -1.9619,
+      "cost_total": 24.24,
+      "cost_gross_ratio": null,
+      "cost_ok": false,
+      "total_return": -0.00262,
+      "max_dd": 0.00262,
+      "calmar": -0.0718,
+      "sharpe": -0.6785,
+      "max_consec_losses": 9,
+      "gates": {
+        "1_max_drawdown_le_10pct": true,
+        "2_calmar_ge_1p5": false,
+        "3_cost_le_50pct_of_gross": false,
+        "4_max_consec_losses_le_5": false,
+        "5_extreme_not_loss": "PENDING_BOSS_DECISION",
+        "sharpe_hard_gate": "不设硬门槛（min_sharpe=null）",
+        "min_trades_ge_30": false
+      },
+      "decidable_4plus_trades_pass": false,
+      "passed_final": false,
+      "passed_final_reason": "极端段冻结判定『待老板拍板』，第 5 条未闭合；不得把 N/A 当通过、不得用 0 占位 → passed_final=False（如实）",
+      "trades_sample": [
+        {
+          "entry_bar": 75,
+          "exit_bar": 78,
+          "reason": "timeout",
+          "state": "SHORT_SPREAD",
+          "gross": -0.5502,
+          "cost": 2.02,
+          "net": -2.5702,
+          "entry_date": "20120911",
+          "exit_date": "20120914"
+        },
+        {
+          "entry_bar": 169,
+          "exit_bar": 177,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": 1.1343,
+          "cost": 2.02,
+          "net": -0.8857,
+          "entry_date": "20130131",
+          "exit_date": "20130219"
+        },
+        {
+          "entry_bar": 880,
+          "exit_bar": 888,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": 2.0853,
+          "cost": 2.02,
+          "net": 0.0653,
+          "entry_date": "20160107",
+          "exit_date": "20160119"
+        },
+        {
+          "entry_bar": 1314,
+          "exit_bar": 1331,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": 0.7727,
+          "cost": 2.02,
+          "net": -1.2473,
+          "entry_date": "20171020",
+          "exit_date": "20171114"
+        },
+        {
+          "entry_bar": 1477,
+          "exit_bar": 1515,
+          "reason": "timeout",
+          "state": "LONG_SPREAD",
+          "gross": -5.796,
+          "cost": 2.02,
+          "net": -7.816,
+          "entry_date": "20180621",
+          "exit_date": "20180814"
+        }
+      ],
+      "adjusted": false,
+      "adjustment_limit": "未复权（阶段一结论：无法可靠复权）；结果不得写成『可上线依据』"
+    },
+    {
+      "id": "BANK_PAIR",
+      "pair": "sh600000×sz000001",
+      "leg_a": "sh600000",
+      "leg_b": "sz000001",
+      "kind": "stock×stock",
+      "corporate_action_risk": "unadjusted+survivorship",
+      "reason": "主板银行股对（浦发银行×平安银行）：有协整可能，但个股送转/分红**未复权**且现存股票池回测 1998 存在**幸存者偏差**（🔴）。仅作敏感性对照，不进冻结判定主结论、不作为可上线依据。",
+      "n_bars": 6271,
+      "start_date": "19991110",
+      "end_date": "20261113",
+      "n_trades": 45,
+      "gross_total": -57.4182,
+      "cost_total": 90.9,
+      "cost_gross_ratio": null,
+      "cost_ok": false,
+      "total_return": -0.014832,
+      "max_dd": 0.021496,
+      "calmar": -0.0279,
+      "sharpe": -0.1713,
+      "max_consec_losses": 3,
+      "gates": {
+        "1_max_drawdown_le_10pct": true,
+        "2_calmar_ge_1p5": false,
+        "3_cost_le_50pct_of_gross": false,
+        "4_max_consec_losses_le_5": true,
+        "5_extreme_not_loss": "PENDING_BOSS_DECISION",
+        "sharpe_hard_gate": "不设硬门槛（min_sharpe=null）",
+        "min_trades_ge_30": true
+      },
+      "decidable_4plus_trades_pass": false,
+      "passed_final": false,
+      "passed_final_reason": "极端段冻结判定『待老板拍板』，第 5 条未闭合；不得把 N/A 当通过、不得用 0 占位 → passed_final=False（如实）",
+      "trades_sample": [
+        {
+          "entry_bar": 75,
+          "exit_bar": 78,
+          "reason": "timeout",
+          "state": "SHORT_SPREAD",
+          "gross": -5.1234,
+          "cost": 2.02,
+          "net": -7.1434,
+          "entry_date": "20000313",
+          "exit_date": "20000316"
+        },
+        {
+          "entry_bar": 122,
+          "exit_bar": 130,
+          "reason": "timeout",
+          "state": "SHORT_SPREAD",
+          "gross": 2.2251,
+          "cost": 2.02,
+          "net": 0.2051,
+          "entry_date": "20000525",
+          "exit_date": "20000606"
+        },
+        {
+          "entry_bar": 235,
+          "exit_bar": 242,
+          "reason": "timeout",
+          "state": "SHORT_SPREAD",
+          "gross": 7.7147,
+          "cost": 2.02,
+          "net": 5.6947,
+          "entry_date": "20001108",
+          "exit_date": "20001117"
+        },
+        {
+          "entry_bar": 521,
+          "exit_bar": 531,
+          "reason": "timeout",
+          "state": "SHORT_SPREAD",
+          "gross": 23.695,
+          "cost": 2.02,
+          "net": 21.675,
+          "entry_date": "20020122",
+          "exit_date": "20020206"
+        },
+        {
+          "entry_bar": 590,
+          "exit_bar": 602,
+          "reason": "timeout",
+          "state": "SHORT_SPREAD",
+          "gross": 16.4524,
+          "cost": 2.02,
+          "net": 14.4324,
+          "entry_date": "20020523",
+          "exit_date": "20020610"
+        }
+      ],
+      "adjusted": false,
+      "adjustment_limit": "未复权（阶段一结论：无法可靠复权）；结果不得写成『可上线依据』"
+    }
+  ],
+  "extreme_sensitivity": {
+    "IDX_PAIR": [
+      {
+        "segment": "2008_crisis",
+        "label": "2008 金融危机",
+        "covered": true,
+        "bars": 246,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2015_crash",
+        "label": "2015 股灾",
+        "covered": true,
+        "bars": 146,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2018_bear",
+        "label": "2018 熊市",
+        "covered": true,
+        "bars": 243,
+        "closed_trades": 2,
+        "segment_realized_pnl": 0.9138,
+        "equity_change": 0.9139,
+        "equity_change_pct": 9.1e-05,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2020_covid",
+        "label": "2020 疫情冲击",
+        "covered": true,
+        "bars": 79,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2022_bear",
+        "label": "2022 熊市",
+        "covered": true,
+        "bars": 242,
+        "closed_trades": 1,
+        "segment_realized_pnl": 0.4078,
+        "equity_change": 0.4077,
+        "equity_change_pct": 4.1e-05,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2024_feb",
+        "label": "2024-02 流动性冲击",
+        "covered": true,
+        "bars": 37,
+        "closed_trades": 1,
+        "segment_realized_pnl": -24.4892,
+        "equity_change": -24.4892,
+        "equity_change_pct": -0.002446,
+        "survived_if_chosen": false
+      },
+      {
+        "segment": "2026_feb_crypto_window",
+        "label": "2026-02（加密崩盘段原冻结值，A 股同期对照）",
+        "covered": true,
+        "bars": 5,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      }
+    ],
+    "IDX_ETF": [
+      {
+        "segment": "2008_crisis",
+        "label": "2008 金融危机",
+        "covered": false,
+        "note": "该组数据不覆盖此段（上市前）",
+        "bars": 0,
+        "closed_trades": 0,
+        "equity_change": null
+      },
+      {
+        "segment": "2015_crash",
+        "label": "2015 股灾",
+        "covered": true,
+        "bars": 146,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2018_bear",
+        "label": "2018 熊市",
+        "covered": true,
+        "bars": 243,
+        "closed_trades": 1,
+        "segment_realized_pnl": -7.816,
+        "equity_change": -7.816,
+        "equity_change_pct": -0.000782,
+        "survived_if_chosen": false
+      },
+      {
+        "segment": "2020_covid",
+        "label": "2020 疫情冲击",
+        "covered": true,
+        "bars": 79,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2022_bear",
+        "label": "2022 熊市",
+        "covered": true,
+        "bars": 242,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2024_feb",
+        "label": "2024-02 流动性冲击",
+        "covered": true,
+        "bars": 37,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2026_feb_crypto_window",
+        "label": "2026-02（加密崩盘段原冻结值，A 股同期对照）",
+        "covered": true,
+        "bars": 5,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      }
+    ],
+    "BANK_PAIR": [
+      {
+        "segment": "2008_crisis",
+        "label": "2008 金融危机",
+        "covered": true,
+        "bars": 242,
+        "closed_trades": 1,
+        "segment_realized_pnl": -56.9956,
+        "equity_change": -56.9956,
+        "equity_change_pct": -0.005681,
+        "survived_if_chosen": false
+      },
+      {
+        "segment": "2015_crash",
+        "label": "2015 股灾",
+        "covered": true,
+        "bars": 132,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2018_bear",
+        "label": "2018 熊市",
+        "covered": true,
+        "bars": 243,
+        "closed_trades": 3,
+        "segment_realized_pnl": -14.2199,
+        "equity_change": -14.22,
+        "equity_change_pct": -0.001429,
+        "survived_if_chosen": false
+      },
+      {
+        "segment": "2020_covid",
+        "label": "2020 疫情冲击",
+        "covered": true,
+        "bars": 79,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2022_bear",
+        "label": "2022 熊市",
+        "covered": true,
+        "bars": 242,
+        "closed_trades": 6,
+        "segment_realized_pnl": -15.9667,
+        "equity_change": -15.9666,
+        "equity_change_pct": -0.001618,
+        "survived_if_chosen": false
+      },
+      {
+        "segment": "2024_feb",
+        "label": "2024-02 流动性冲击",
+        "covered": true,
+        "bars": 37,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      },
+      {
+        "segment": "2026_feb_crypto_window",
+        "label": "2026-02（加密崩盘段原冻结值，A 股同期对照）",
+        "covered": true,
+        "bars": 5,
+        "closed_trades": 0,
+        "segment_realized_pnl": 0.0,
+        "equity_change": 0.0,
+        "equity_change_pct": 0.0,
+        "survived_if_chosen": true
+      }
+    ]
+  },
+  "comparison_with_crypto": {
+    "crypto_mainline": "加密现货 1h 配对均值回归：M8 132 笔、累计毛利 +$107.93、成本 $192.54、成本/毛利 1.784；phase7 roundtrip 28bp、taker 占 71%；phase9-h1 结论：M8 候选 0 达标（257 组网格口径 0 通过）",
+    "a_share_this_batch": "3 组代表性配对 × 冻结参数 1 组，1d 日线 1998-09-15~2026-11-13；成本假设 roundtrip≈20.2bp（待确认）、未复权",
+    "n_passed_final_a_share": 0,
+    "not_mixed": true,
+    "note": "换市场属 phase6 §4 结构性变量；本批只验证『同一骨架 + A 股数据 + 独立成本』能否跑通全门槛判定，不与加密 257 组合并统计、不据此宣告骨架被证伪或救活"
+  },
+  "compliance": {
+    "local_files_read_only": true,
+    "clients_not_started": true,
+    "no_network_market_data": true,
+    "no_registry_change": true,
+    "src_unchanged": true,
+    "config_unchanged": true,
+    "bat_gitignore_env_unchanged": true,
+    "no_git_commit": true,
+    "no_gate_relax": true,
+    "no_live_trading": true,
+    "no_token_or_key": true,
+    "no_paid_source": true,
+    "no_api_key_registration": true,
+    "no_g6_3_g5_2_jump": true,
+    "result_not_sugarcoated": true
+  }
+}

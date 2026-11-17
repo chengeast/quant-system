@@ -1,0 +1,195 @@
+{
+  "rules": {
+    "entry_sigma": 3.0,
+    "take_profit_sigma_from_entry": 2.5,
+    "stop_loss_sigma_from_entry": 2.0,
+    "timeout_bars": 0,
+    "timeout_hours": 3.0,
+    "timeout_half_life_factor": 1.2,
+    "position_cap": 0.05,
+    "exit_sigma_abs_equiv": 0.5
+  },
+  "gate": {
+    "max_drawdown_pct": 10.0,
+    "min_sharpe": 2.0,
+    "min_calmar": 1.5
+  },
+  "results": [
+    {
+      "timeframe": "15m",
+      "data_bars": 9121,
+      "n_trades": 114,
+      "metrics": {
+        "total_return": -0.01847893920270817,
+        "steady_total_return": -0.009239469601354085,
+        "peak_total_return": -0.01847893920270817,
+        "max_drawdown": 0.018790701248247922,
+        "sharpe": -9.727015767160339,
+        "calmar": -3.811841042199147,
+        "extreme_pnl": 0.0,
+        "extreme_survived": true,
+        "benchmark_total_return": 0.18492213024549628,
+        "beat_benchmark": "False",
+        "bars": 9121,
+        "extreme_window": [
+          1770163200,
+          1770681600
+        ],
+        "max_consecutive_losses": 7,
+        "cost_executable": false,
+        "n_trades": 114,
+        "cost_paid": 167.00255960602132,
+        "gate_pass": {
+          "net_positive": "False",
+          "beat_benchmark": "False",
+          "max_dd": "True",
+          "sharpe": false,
+          "calmar": false,
+          "extreme_survived": true
+        }
+      },
+      "errors": []
+    },
+    {
+      "timeframe": "30m",
+      "data_bars": 9361,
+      "n_trades": 119,
+      "metrics": {
+        "total_return": -0.016052007018817677,
+        "steady_total_return": -0.008026003509408838,
+        "peak_total_return": -0.016052007018817677,
+        "max_drawdown": 0.017213913110117444,
+        "sharpe": -5.867485319497151,
+        "calmar": -1.7586503726750342,
+        "extreme_pnl": 0.0,
+        "extreme_survived": true,
+        "benchmark_total_return": -0.025155932098892293,
+        "beat_benchmark": "True",
+        "bars": 9361,
+        "extreme_window": [
+          1770163200,
+          1770681600
+        ],
+        "max_consecutive_losses": 7,
+        "cost_executable": false,
+        "n_trades": 119,
+        "cost_paid": 173.514783953224,
+        "gate_pass": {
+          "net_positive": "False",
+          "beat_benchmark": "True",
+          "max_dd": "True",
+          "sharpe": false,
+          "calmar": false,
+          "extreme_survived": true
+        }
+      },
+      "errors": []
+    },
+    {
+      "timeframe": "1h",
+      "data_bars": 9841,
+      "n_trades": 132,
+      "metrics": {
+        "total_return": -0.007179290204400604,
+        "steady_total_return": -0.003589645102200302,
+        "peak_total_return": -0.007179290204400604,
+        "max_drawdown": 0.010232427653383598,
+        "sharpe": -0.9882685498293259,
+        "calmar": -0.6247591437836093,
+        "extreme_pnl": 0.002836957593088521,
+        "extreme_survived": "True",
+        "benchmark_total_return": -0.3195527658326119,
+        "beat_benchmark": "True",
+        "bars": 9841,
+        "extreme_window": [
+          1770163200,
+          1770681600
+        ],
+        "max_consecutive_losses": 6,
+        "cost_executable": false,
+        "n_trades": 132,
+        "cost_paid": 192.5783179628647,
+        "gate_pass": {
+          "net_positive": "False",
+          "beat_benchmark": "True",
+          "max_dd": "True",
+          "sharpe": false,
+          "calmar": false,
+          "extreme_survived": "True"
+        }
+      },
+      "errors": []
+    },
+    {
+      "timeframe": "4h",
+      "data_bars": 2461,
+      "n_trades": 1,
+      "metrics": {
+        "total_return": 0.0020601053832509935,
+        "steady_total_return": 0.0010300526916254967,
+        "peak_total_return": 0.0020601053832509935,
+        "max_drawdown": 0.014742791966316405,
+        "sharpe": 0.1584199500861281,
+        "calmar": 0.1291165629891538,
+        "extreme_pnl": 0.0,
+        "extreme_survived": true,
+        "benchmark_total_return": -0.32273172381868037,
+        "beat_benchmark": "True",
+        "bars": 2461,
+        "extreme_window": [
+          1770163200,
+          1770681600
+        ],
+        "max_consecutive_losses": 0,
+        "cost_executable": true,
+        "n_trades": 1,
+        "cost_paid": 1.8289428718405865,
+        "gate_pass": {
+          "net_positive": "True",
+          "beat_benchmark": "True",
+          "max_dd": "True",
+          "sharpe": false,
+          "calmar": false,
+          "extreme_survived": true
+        }
+      },
+      "errors": []
+    },
+    {
+      "timeframe": "1d",
+      "data_bars": 411,
+      "n_trades": 0,
+      "metrics": {
+        "total_return": 0.0010977931858289593,
+        "steady_total_return": 0.0005488965929144797,
+        "peak_total_return": 0.0010977931858289593,
+        "max_drawdown": 0.009750265761539322,
+        "sharpe": 0.09941440784167337,
+        "calmar": 0.10540288131433467,
+        "extreme_pnl": 0.0,
+        "extreme_survived": true,
+        "benchmark_total_return": -0.3207010595002331,
+        "beat_benchmark": "True",
+        "bars": 411,
+        "extreme_window": [
+          1770163200,
+          1770681600
+        ],
+        "max_consecutive_losses": 0,
+        "cost_executable": false,
+        "n_trades": 0,
+        "cost_paid": 0.7290981882336975,
+        "gate_pass": {
+          "net_positive": "True",
+          "beat_benchmark": "True",
+          "max_dd": "True",
+          "sharpe": false,
+          "calmar": false,
+          "extreme_survived": true
+        }
+      },
+      "errors": []
+    }
+  ],
+  "passed_timeframes": []
+}

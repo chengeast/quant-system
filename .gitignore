@@ -11,6 +11,9 @@ data/cache/
 *.csv
 *.h5
 backtest/output/
+# 回测报告与机读结果（G-4-②/G-5/G-6/I 线已验收产物，纳入仓库；含 62MB 逐笔 json 大文件，老板 2026-11-17 17:09 拍板④立即提交）
+!backtest/output/
+!backtest/output/**
 
 # ==================== Python ====================
 __pycache__/
@@ -21,8 +24,9 @@ venv/
 env/
 .ipynb_checkpoints/
 
-# ==================== 本地运行 ====================
+# ==================== 本地运行（日志不入 Git，I 线 *.log 已归档进 output/ 随报告提交）====================
 *.log
+!backtest/output/*.log
 .pytest_cache/
 .coverage
 htmlcov/

@@ -1,0 +1,63 @@
+[bt] XRP/DOGE  1h_95d frozen         bars= 2248 medianH=   9.8 trades=  28 gross=   +48.56 cost=   41.82 net= +0.07% sharpe=   0.25 (2.7s)
+[bt] SOL/DOGE  1h_95d frozen         bars= 2248 medianH=   6.7 trades=  31 gross=   -23.90 cost=   43.56 net= -0.67% sharpe=  -3.77 (2.7s)
+[bt] BTC/ETH   1h_95d frozen         bars= 2248 medianH=   8.8 trades=  31 gross=   -23.87 cost=   44.84 net= -0.69% sharpe=  -7.88 (2.7s)
+[bt] XRP/DOGE  1h_195d frozen         bars= 4648 medianH=   8.4 trades=  60 gross=   +49.82 cost=   89.82 net= -0.40% sharpe=  -0.88 (5.7s)
+[bt] SOL/DOGE  1h_195d frozen         bars= 4648 medianH=   6.7 trades=  69 gross=   -41.47 cost=   96.85 net= -1.38% sharpe=  -4.12 (5.6s)
+[bt] BTC/ETH   1h_195d frozen         bars= 4648 medianH=   8.1 trades=  68 gross=   -91.41 cost=   98.12 net= -1.90% sharpe=  -8.04 (5.7s)
+
+====================================================================================================
+降尺度对照 · 门槛判定（极端段 2026-02 不在 15m/30m 窗口内 → N/A，不计通过）
+====================================================================================================
+scale pair      tag            trades     gross      cost   g/trade   c/trade      net   sharpe   calmar  costOK
+1h   XRP/DOGE  frozen            127    -12.72    190.21    -0.100     1.498   -2.03%   -2.054   -0.728   False
+1h   XRP/DOGE  alt_5s_1s_8H       35    -28.24     52.56    -0.807     1.502   -0.81%   -1.100   -0.578   False
+1h   SOL/DOGE  frozen            144   -107.68    201.69    -0.748     1.401   -3.09%   -2.739   -0.842   False
+1h   SOL/DOGE  alt_5s_1s_8H       34    +45.38     47.71    +1.335     1.403   -0.02%   -0.034   -0.023   False
+1h   BTC/ETH   frozen            140    -58.02    202.29    -0.414     1.445   -2.60%   -4.374   -0.885   False
+1h   BTC/ETH   alt_5s_1s_8H       38    -31.09     55.03    -0.818     1.448   -0.86%   -1.934   -0.617   False
+15m  XRP/DOGE  frozen            104    +53.40    154.84    +0.513     1.489   -1.01%   -4.182   -3.637   False
+15m  XRP/DOGE  alt_5s_1s_8H       35     +3.45     52.08    +0.099     1.488   -0.49%   -2.215   -2.765   False
+15m  SOL/DOGE  frozen            107    -14.55    149.91    -0.136     1.401   -1.64%   -8.252   -3.867   False
+15m  SOL/DOGE  alt_5s_1s_8H       36    -67.72     50.46    -1.881     1.402   -1.18%   -7.521   -3.792   False
+15m  BTC/ETH   frozen            130    -27.21    187.54    -0.209     1.443   -2.15%  -16.107   -3.881   False
+15m  BTC/ETH   alt_5s_1s_8H       37     +2.32     53.39    +0.063     1.443   -0.51%   -5.962   -3.685   False
+30m  XRP/DOGE  frozen            122    +80.30    182.26    +0.658     1.494   -1.02%   -2.325   -1.683   False
+30m  XRP/DOGE  alt_5s_1s_8H       33    -19.24     49.29    -0.583     1.494   -0.69%   -2.536   -1.712   False
+30m  SOL/DOGE  frozen            126    +45.08    176.61    +0.358     1.402   -1.32%   -4.011   -1.775   False
+30m  SOL/DOGE  alt_5s_1s_8H       31    +51.54     43.46    +1.663     1.402   +0.08%    0.321    0.544   False
+30m  BTC/ETH   frozen            122     -1.49    175.70    -0.012     1.440   -1.77%   -7.366   -1.888   False
+30m  BTC/ETH   alt_5s_1s_8H       42    -20.50     60.42    -0.488     1.439   -0.81%   -3.682   -1.823   False
+1h_95d XRP/DOGE  frozen             28    +48.56     41.82    +1.734     1.494   +0.07%    0.255    0.702   False
+1h_95d SOL/DOGE  frozen             31    -23.90     43.56    -0.771     1.405   -0.67%   -3.771   -3.445   False
+1h_95d BTC/ETH   frozen             31    -23.87     44.84    -0.770     1.446   -0.69%   -7.877   -3.832   False
+1h_195d XRP/DOGE  frozen             60    +49.82     89.82    +0.830     1.497   -0.40%   -0.878   -1.003   False
+1h_195d SOL/DOGE  frozen             69    -41.47     96.85    -0.601     1.404   -1.38%   -4.119   -1.780   False
+1h_195d BTC/ETH   frozen             68    -91.41     98.12    -1.344     1.443   -1.90%   -8.042   -1.890   False
+
+冻结门槛逐项（不含 N/A 的极端段）：
+  1h  XRP/DOGE  frozen         3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=False
+  1h  XRP/DOGE  alt_5s_1s_8H   3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=False
+  1h  SOL/DOGE  frozen         2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=False
+  1h  SOL/DOGE  alt_5s_1s_8H   3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=False
+  1h  BTC/ETH   frozen         2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=False
+  1h  BTC/ETH   alt_5s_1s_8H   3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=True
+  15m XRP/DOGE  frozen         2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=N/A
+  15m XRP/DOGE  alt_5s_1s_8H   3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  15m SOL/DOGE  frozen         2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=N/A
+  15m SOL/DOGE  alt_5s_1s_8H   3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  15m BTC/ETH   frozen         3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  15m BTC/ETH   alt_5s_1s_8H   3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  30m XRP/DOGE  frozen         2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=N/A
+  30m XRP/DOGE  alt_5s_1s_8H   3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  30m SOL/DOGE  frozen         3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  30m SOL/DOGE  alt_5s_1s_8H   4/7  未过: sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  30m BTC/ETH   frozen         3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  30m BTC/ETH   alt_5s_1s_8H   2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=N/A
+  1h_95d XRP/DOGE  frozen         3/7  未过: sharpe>=2,calmar>=1.5,cost_exec,sample>30  极端段=N/A
+  1h_95d SOL/DOGE  frozen         2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=N/A
+  1h_95d BTC/ETH   frozen         3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  1h_195d XRP/DOGE  frozen         3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+  1h_195d SOL/DOGE  frozen         2/7  未过: net>0,sharpe>=2,calmar>=1.5,consec<=5,cost_exec  极端段=N/A
+  1h_195d BTC/ETH   frozen         3/7  未过: net>0,sharpe>=2,calmar>=1.5,cost_exec  极端段=N/A
+
+-> C:\Users\Administrator\WorkBuddy AI\2026-11-06-20-40-51\backtest\output\scale_probe_15m_30m.csv  (24 组)

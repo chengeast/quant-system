@@ -1,0 +1,42 @@
+{
+  "fetched_at": "2026-11-09 05:03:58 UTC",
+  "order_usdt": 1000.0,
+  "rows": [
+    {
+      "sym": "BCH",
+      "mid": 240.37,
+      "bp": 14.311,
+      "levels": 6,
+      "ts": 1794200639,
+      "pass_8bp": false,
+      "pass_15bp": true
+    },
+    {
+      "sym": "LTC",
+      "mid": 50.795,
+      "bp": 2.319,
+      "levels": 3,
+      "ts": 1794200640,
+      "pass_8bp": true,
+      "pass_15bp": true
+    },
+    {
+      "sym": "AVAX",
+      "mid": 7.9905,
+      "bp": 4.117,
+      "levels": 6,
+      "ts": 1794200642,
+      "pass_8bp": true,
+      "pass_15bp": true
+    },
+    {
+      "sym": "ADA",
+      "mid": 0.1757,
+      "bp": 3.775,
+      "levels": 5,
+      "ts": 1794200643,
+      "pass_8bp": true,
+      "pass_15bp": true
+    }
+  ]
+}

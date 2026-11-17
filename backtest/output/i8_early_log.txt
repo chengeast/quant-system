@@ -1,0 +1,9 @@
+[plan] early-window targets=342（退市股+1998前上市）
+login success!
+[progress] 1/342 ok=58 empty=50 elapsed=26s
+[progress] 50/342 ok=84 empty=73 elapsed=134s
+[progress] 100/342 ok=133 empty=74 elapsed=338s
+[progress] 150/342 ok=157 empty=100 elapsed=371s
+[progress] 200/342 ok=157 empty=150 elapsed=388s
+logout success!
+[DONE] ok=157 empty=185 fail=0

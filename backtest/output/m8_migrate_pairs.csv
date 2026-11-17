@@ -1,0 +1,4 @@
+pair,ca,cb,n_entries,reg,div,reg_rate,timeout_bars,median_h,corr,h_out,h_degraded,net_peak,max_dd,sharpe,n_trades,cost,extreme_survived
+XRP/DOGE,XRP_USDT_1h_410d.parquet,DOGE_USDT_1h_410d.parquet,462,54,408,0.1169,9,8.1,0.9735,60,716,0.0,0.035999,-7.2688,275,294.0,False
+SOL/DOGE,SOL_USDT_1h_410d.parquet,DOGE_USDT_1h_410d.parquet,499,46,453,0.0922,8,7.3,0.9456,60,852,0.0,0.027774,-5.3846,296,296.33,True
+BTC/ETH,BTC_USDT_1h_410d.parquet,ETH_USDT_1h_410d.parquet,453,46,407,0.1015,8,6.8,0.9877,60,974,0.0,0.028944,-8.1826,269,277.43,True

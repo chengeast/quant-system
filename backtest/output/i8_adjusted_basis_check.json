@@ -1,0 +1,45 @@
+{
+  "batch": "I-8",
+  "role": "data_engineer",
+  "generated_at": "2026-11-16T14:49:10.866142+00:00",
+  "source": "baostock",
+  "test": "后复权基准固定性黄金验证（同历史日跨查询终点因子恒定）",
+  "method": "对同一 symbol、同一历史交易日，分别用 end=2015-12-31 与 end=2026-11-13 查询 adjustflag=1/3，比较因子 adj/raw；恒定=后复权基准固定，漂移=前复权特征",
+  "results": [
+    {
+      "symbol": "sh.600000",
+      "probe_date": "2000-01-10",
+      "actual_date_end1": "2000-01-10",
+      "actual_date_end2": "2000-01-10",
+      "factor_end_2015": 1.0,
+      "factor_end_2026": 1.0,
+      "stable": true,
+      "verdict": "PASS"
+    },
+    {
+      "symbol": "sh.600519",
+      "probe_date": "2005-06-15",
+      "actual_date_end1": "2005-06-15",
+      "actual_date_end2": "2005-06-15",
+      "factor_end_2015": 1.626076,
+      "factor_end_2026": 1.626076,
+      "stable": true,
+      "verdict": "PASS"
+    },
+    {
+      "symbol": "sz.000001",
+      "probe_date": "2005-06-15",
+      "actual_date_end1": "2005-06-15",
+      "actual_date_end2": "2005-06-15",
+      "factor_end_2015": 29.733216,
+      "factor_end_2026": 29.733216,
+      "stable": true,
+      "verdict": "PASS"
+    }
+  ],
+  "requests_estimate": 12,
+  "all_pass": true,
+  "verdict": "PASS（后复权基准固定、不漂移，可用于回测）",
+  "elapsed_sec": 277.4,
+  "redlines": "免费免key源、有限请求、未写data/cache、未脑补因子"
+}

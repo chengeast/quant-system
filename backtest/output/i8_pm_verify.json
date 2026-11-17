@@ -1,0 +1,123 @@
+{
+  "batch": "I-8",
+  "role": "PM",
+  "checks": [
+    {
+      "item": "1.config_sha",
+      "pass": true,
+      "detail": "sha16=31fbb054cddb55af (期望 31fbb054cddb55af)"
+    },
+    {
+      "item": "1.config_mtime",
+      "pass": true,
+      "detail": "mtime=2026-11-12 16:46:44"
+    },
+    {
+      "item": "1.git_head",
+      "pass": true,
+      "detail": "HEAD=cde835f (期望 cde835f 无新 commit)"
+    },
+    {
+      "item": "2.adj_parquet_count",
+      "pass": true,
+      "detail": "parquet=5330 done=5330 failed=0"
+    },
+    {
+      "item": "2.adj_manifest",
+      "pass": true,
+      "detail": "manifest 存在"
+    },
+    {
+      "item": "2.unavailable_preserved",
+      "pass": true,
+      "detail": "_UNAVAILABLE.md 原文保留 + I-8 追加段"
+    },
+    {
+      "item": "2.cross_validation",
+      "pass": true,
+      "detail": "probe/basis/equivalence = [True, True, True]"
+    },
+    {
+      "item": "3.roster",
+      "pass": true,
+      "detail": "{'delisting_roster.json': 710, 'historical_st.json': 198, 'shareholder_reduction.json': 50, '_manifest.json': 'manifest'}"
+    },
+    {
+      "item": "3.delisted_daily_bars",
+      "pass": true,
+      "detail": "含退市日线的退市股 73 只（i8_adjusted_land 的 _progress.json）"
+    },
+    {
+      "item": "4.early_manifest",
+      "pass": true,
+      "detail": "八年日线 manifest 存在（可降级）"
+    },
+    {
+      "item": "5.script",
+      "pass": true,
+      "detail": "a_share_i8_adjusted_rerun.py 存在"
+    },
+    {
+      "item": "5.json_not_hung",
+      "pass": true,
+      "detail": "status=n/a batch=I-8"
+    },
+    {
+      "item": "5.adjusted_true",
+      "pass": true,
+      "detail": "adjusted=true"
+    },
+    {
+      "item": "5.extreme_gate",
+      "pass": true,
+      "detail": "extreme_gate=NOT_EVALUATED_BY_BOSS_ORDER"
+    },
+    {
+      "item": "5.n_passed_final_0",
+      "pass": true,
+      "detail": "n_passed_final=0"
+    },
+    {
+      "item": "5.not_mixed",
+      "pass": true,
+      "detail": "not_mixed=true"
+    },
+    {
+      "item": "5.n_traded_recalc",
+      "pass": true,
+      "detail": "trades去重=4124 json=4124"
+    },
+    {
+      "item": "5.n_runs_60",
+      "pass": true,
+      "detail": "n_runs=60 runs=60"
+    },
+    {
+      "item": "5.final_report",
+      "pass": true,
+      "detail": "i8_final_backtest_report.md 存在"
+    },
+    {
+      "item": "6.dispatch_log_I8",
+      "pass": true,
+      "detail": "dispatch_log.md I-8 段存在"
+    },
+    {
+      "item": "6.phase9-i8-data-landing-and-validation",
+      "pass": true,
+      "detail": "agents/phase9-i8-data-landing-and-validation.md 存在"
+    },
+    {
+      "item": "6.phase9-i8-adjusted-rerun",
+      "pass": true,
+      "detail": "agents/phase9-i8-adjusted-rerun.md 存在"
+    },
+    {
+      "item": "7.wording",
+      "pass": true,
+      "detail": "禁用词实际违规命中=[]（禁止语境不计）"
+    }
+  ],
+  "n_pass": 23,
+  "n_total": 23
+}

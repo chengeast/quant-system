@@ -86,23 +86,38 @@ hedge_ratio:
   daily_change_max: 0.10            # 日变化率<10%（A/C 值）
   invalidate_on_out_of_range: true   # 越界即整对 INVALID + 告警
 
-# ---- 回测通过门槛（争议点4 多数裁决）----
+# ---- 回测通过门槛（争议点4 多数裁决；G-4-② 老板 A 方案降门槛）----
 backtest_gate:
-  max_drawdown_pct: 10.0        # 回撤≤10%
-  min_sharpe: 2.0               # 夏普≥2.0（扣 0.08% 成本后）
-  min_calmar: 1.5               # Calmar≥1.5
-  max_consecutive_losses: 5     # 最长连续亏损≤5 笔
+  max_drawdown_pct: 10.0        # 回撤≤10%（G-4-② 维持不动）
+  min_sharpe: null              # G-4-② PM 裁决落地「不设夏普硬门槛」（老板原话「夏普率本就不要求过 1.0」，
+                                 # 未给具体数值 → 二选一选「不设硬门槛」，min_sharpe=null；脚本读 null → 夏普门槛不启用，
+                                 # 判定 6 条退化为 5 条（回撤/Calmar/成本/连亏/极端段 N/A）；写进 json/meta
+  min_calmar: 1.5               # Calmar≥1.5（G-4-② 维持不动）
+  max_consecutive_losses: 5     # 最长连续亏损≤5 笔（G-4-② 维持不动）
   # 极端段门槛（数据窗口 2025-09~2026-11 不含 2024-09，按用户裁决改写为窗口内真实极端段）
   # 2026-02-04~02-10：7 日累计 -25.7%（02-05 单日 -14.0%），为窗口内最极端崩盘段
   must_survive_extreme_window: "2026-02"
   extreme_window_start: 1770163200   # 2026-02-04 00:00 UTC
   extreme_window_end: 1770681600     # 2026-02-10 00:00 UTC
+  # G-4-② 声明：极端段维持原值（2026-02）不动；33d funding 窗口下无 2026-02 覆盖 → N/A（数据源缺口），不计通过
 
-# ---- 交易成本假设（吸纳 B、C，升级为硬门槛）----
+# ---- 交易成本假设（吸纳 B、C，升级为硬门槛；G-4-② 费率分腿申报）----
 cost_model:
-  taker_fee_pct: 0.001          # Gate.io taker 0.1%
+  spot_leg:                     # 现货腿（期现套利/均值回归现货一侧）：Gate.io VIP0 现货 taker=maker=0.1%/边
+    taker_fee_pct: 0.001
+    maker_fee_pct: 0.001
+    note: "老板 2026-11-12 澄清官方事实：现货 taker=maker=0.1%/边；roundtrip=0.2%"
+  futures_leg:                  # 合约腿（carry/期现套利的永续一侧、funding 收取方）：Gate.io VIP0 永续 taker=0.05%、maker=0.02%/边
+    taker_fee_pct: 0.0005
+    maker_fee_pct: 0.0002
+    note: "老板 2026-11-12 澄清官方事实（原样引用）：Gate.io VIP0 合约（永续）maker=0.02%、taker=0.05%/边；"
+          "G-3 误按现货 0.1% 算，成本贵 2~5 倍；G-4-② 改按合约档重算；roundtrip maker 0.04%、taker 0.10%"
   slippage_bps_per_side: [3, 5]  # 滑点≥3–5bp/边
-  max_cost_as_pct_of_gross: 0.35  # 每笔成本≤毛利 35%
+  maker_slippage_bps_per_side: 0.5   # G-4-②：maker 挂单被动成交 0.5bp/边（假设值、盘上无实测，沿用 G-3）
+  latency_1_3s_pct: 0.00001        # G-4-②：1~3s 时延 0.1bp（假设值、盘上无实测，沿用 G-3）
+  max_cost_as_pct_of_gross: 0.50   # G-4-② 老板 A 方案：0.35→0.50（每笔成本≤毛利 50%）
+  # 兼容字段：旧 taker_fee_pct 保留为现货腿 taker（0.1%），供 G-3 旧脚本继续读取，数值不变
+  taker_fee_pct: 0.001
 
 # ---- 因子拥挤 / alpha 衰减监控（用户 2026-11-07 提出 + phase4 §9.2 修正）----
 # 原则：衰减是渐进过程且被 AI 持续压缩，不可设固定重估周期，须"突变检测 + 滚动窗口"
@@ -184,6 +199,16 @@ audit:
     action: "timeframe_parameterization"
     reason: "用户裁决「1h 周期不能写死，这是一个周期参数」：新增 timeframe 段声明默认周期/市场交易日历/防呆规则；修正 annualization 过时 1min 口径为按 interval 派生；bars_unit 改名 measured_on_interval 明确为数据血缘标注（非运行时常量）；冻结门槛、信号参数、成本模型、实盘开关均未改动。"
     checksum: "fd33325c9493b0ed5a1eafdde996164187886a81474d7f10a9e994138732244c"
+  - ts: "2026-11-12"
+    actor: "backend_architect"
+    action: "gate_relax_futures_fee_split"
+    reason: "老板 2026-11-12 A 方案指令：夏普不再要求过 1.0 + 成本 35%→50% + 合约档费率（现货 0.1% / 合约 maker 0.02%·taker 0.05%），33d 窗口重跑 G1 carry；落地口径：min_sharpe 2.0→1.0（夏普≥1.0，非不设硬门槛）、max_cost_as_pct_of_gross 0.35→0.50、cost_model 拆 spot_leg/futures_leg 双腿分报；回撤≤10%、Calmar≥1.5、连亏≤5、极端段 2026-02（维持 N/A）未动"
+    checksum: "b00853807fa8d25645b0fb88feaacf25813fde1cdba3f408799ecd608ad535fd"
+  - ts: "2026-11-12"
+    actor: "backend_architect"
+    action: "sharpe_gate_disable_audit"
+    reason: "老板 2026-11-12 A 方案指令：夏普不再要求过 1.0 + 成本 35%→50% + 合约档费率（现货 0.1% / 合约 maker 0.02%·taker 0.05%），33d 窗口重跑 G1 carry；落地口径：min_sharpe 2.0→null（PM 裁决不设夏普硬门槛，老板原话「夏普率本就不要求过 1.0」二选一选不设门槛）、max_cost_as_pct_of_gross 0.35→0.50、cost_model 拆 spot_leg/futures_leg 双腿分报；回撤≤10%、Calmar≥1.5、连亏≤5、极端段 2026-02（维持 N/A）未动。本条为 min_sharpe null 落地后的 SHA256 重算 + --update 留痕（verify_params PASS）。"
+    checksum: "cc56bb04fe10183b3db25a3d43202dde06ce91ed2327fb34d83b44c12befab20"
 live_trading:
   enabled: false               # 硬边界：MVP 默认关闭
   require_manual_approval: true

@@ -1,0 +1,33 @@
+login success!
+[plan] pool=5687 todo=5567 limit=ALL
+[progress] 1/5567 elapsed=2s rate=0.6/s ok=121 fail=0
+[progress] 200/5567 elapsed=91s rate=2.2/s ok=320 fail=0
+[progress] 400/5567 elapsed=204s rate=2.0/s ok=520 fail=0
+[progress] 600/5567 elapsed=292s rate=2.1/s ok=720 fail=0
+[progress] 800/5567 elapsed=372s rate=2.2/s ok=920 fail=0
+[progress] 1000/5567 elapsed=447s rate=2.2/s ok=1120 fail=0
+[progress] 1200/5567 elapsed=525s rate=2.3/s ok=1320 fail=0
+[progress] 1400/5567 elapsed=592s rate=2.4/s ok=1520 fail=0
+[progress] 1600/5567 elapsed=664s rate=2.4/s ok=1720 fail=0
+[progress] 1800/5567 elapsed=731s rate=2.5/s ok=1920 fail=0
+[progress] 2000/5567 elapsed=799s rate=2.5/s ok=2120 fail=0
+[progress] 2200/5567 elapsed=868s rate=2.5/s ok=2320 fail=0
+[progress] 2400/5567 elapsed=1194s rate=2.0/s ok=2520 fail=0
+[progress] 2600/5567 elapsed=1273s rate=2.0/s ok=2720 fail=0
+[progress] 2800/5567 elapsed=1363s rate=2.1/s ok=2920 fail=0
+[progress] 3000/5567 elapsed=1438s rate=2.1/s ok=3120 fail=0
+[progress] 3200/5567 elapsed=1516s rate=2.1/s ok=3320 fail=0
+[progress] 3400/5567 elapsed=1594s rate=2.1/s ok=3520 fail=0
+[progress] 3600/5567 elapsed=1680s rate=2.1/s ok=3720 fail=0
+[progress] 3800/5567 elapsed=1747s rate=2.2/s ok=3920 fail=0
+[progress] 4000/5567 elapsed=1824s rate=2.2/s ok=4120 fail=0
+[progress] 4200/5567 elapsed=1908s rate=2.2/s ok=4320 fail=0
+[progress] 4400/5567 elapsed=1975s rate=2.2/s ok=4520 fail=0
+[progress] 4600/5567 elapsed=2048s rate=2.2/s ok=4720 fail=0
+[progress] 4800/5567 elapsed=2124s rate=2.3/s ok=4920 fail=0
+[progress] 5000/5567 elapsed=2191s rate=2.3/s ok=5120 fail=0
+[progress] 5200/5567 elapsed=2270s rate=2.3/s ok=5320 fail=0
+[progress] 5400/5567 elapsed=2331s rate=2.3/s ok=5330 fail=190
+logout success!
+[manifest] C:\Users\Administrator\WorkBuddy AI\2026-11-06-20-40-51\data\cache\tdx_a_share_adjusted\_manifest.json
+[DONE] ok=5330 fail=357 elapsed=2377s requests=5691

@@ -1,0 +1,4 @@
+SELFTEST vector port OK (50 random keys)
+scan region 1 scanned=0.1MB hits=0
+scan region 51 scanned=10.8MB hits=0
+scan region 101 scanned=62.0MB hits=0

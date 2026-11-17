@@ -96,6 +96,10 @@ def load_gate_from_yaml() -> Dict[str, Any]:
     g["max_drawdown_pct"] = float(m.group(1)) if m else 10.0
     m = re.search(r"min_sharpe:\s*([\d.]+)", seg)
     g["min_sharpe"] = float(m.group(1)) if m else 2.0
+    # G-4-②：min_sharpe=null → 不设夏普硬门槛（老板原话「夏普率本就不要求过 1.0」）
+    mnull = re.search(r"min_sharpe:\s*null", seg)
+    if mnull:
+        g["min_sharpe"] = None
     m = re.search(r"min_calmar:\s*([\d.]+)", seg)
     g["min_calmar"] = float(m.group(1)) if m else 1.5
     m = re.search(r"max_consecutive_losses:\s*(\d+)", seg)
@@ -106,20 +110,44 @@ def load_gate_from_yaml() -> Dict[str, Any]:
 
 
 def load_cost_from_yaml() -> Dict[str, Any]:
-    """读 cost_model 段数值（只读，不改 yaml）。"""
+    """读 cost_model 段数值（只读，不改 yaml）。
+    G-4-②：合约腿走 futures_leg（taker=0.05%/maker=0.02%）、现货腿走 spot_leg（0.1%）。
+    """
     import re
     txt = PARAM_YAML.read_text(encoding="utf-8")
     i = txt.index("cost_model:")
     j = txt.find("# ---- 因子拥挤", i)
     seg = txt[i:(j if j > i else len(txt))]
     c: Dict[str, Any] = {}
+    # 兼容字段（旧 taker_fee_pct，供 G-3 旧脚本；数值 0.001=现货腿）
     m = re.search(r"taker_fee_pct:\s*([\d.]+)", seg)
     c["taker_fee_pct"] = float(m.group(1)) if m else 0.001
     m = re.search(r"slippage_bps_per_side:\s*\[([^\]]+)\]", seg)
     c["slippage_bps_per_side"] = (
         [float(x) for x in m.group(1).split(",")] if m else [3.0, 5.0])
     m = re.search(r"max_cost_as_pct_of_gross:\s*([\d.]+)", seg)
-    c["max_cost_as_pct_of_gross"] = float(m.group(1)) if m else 0.35
+    c["max_cost_as_pct_of_gross"] = float(m.group(1)) if m else 0.50
+    # G-4-② 分腿费率：futures_leg（合约腿 taker/maker 双档）
+    fl = re.search(r"futures_leg:\s*(?:#[^\n]*\n\s*)*"
+                   r"taker_fee_pct:\s*([\d.]+)\s*\n\s*"
+                   r"maker_fee_pct:\s*([\d.]+)", seg)
+    if fl:
+        c["futures_taker_fee_pct"] = float(fl.group(1))
+        c["futures_maker_fee_pct"] = float(fl.group(2))
+    else:
+        # 回退：无 futures_leg 段（G-3 旧 yaml）→ 合约腿=现货腿=0.1%
+        c["futures_taker_fee_pct"] = c["taker_fee_pct"]
+        c["futures_maker_fee_pct"] = c["taker_fee_pct"]
+    # G-4-② 分腿费率：spot_leg（现货腿 taker/maker）
+    sl = re.search(r"spot_leg:\s*(?:#[^\n]*\n\s*)*"
+                   r"taker_fee_pct:\s*([\d.]+)\s*\n\s*"
+                   r"maker_fee_pct:\s*([\d.]+)", seg)
+    if sl:
+        c["spot_taker_fee_pct"] = float(sl.group(1))
+        c["spot_maker_fee_pct"] = float(sl.group(2))
+    else:
+        c["spot_taker_fee_pct"] = c["taker_fee_pct"]
+        c["spot_maker_fee_pct"] = c["taker_fee_pct"]
     return c
 
 
@@ -170,12 +198,18 @@ class FeeTier:
 
 
 def build_tiers(cost_cfg: Dict[str, Any]) -> Dict[str, FeeTier]:
-    fee = cost_cfg["taker_fee_pct"]
+    """G-4-② 合约腿双档费率（读 futures_leg，taker 0.05% / maker 0.02%）。
+    现货腿（spot_leg 0.1%）本轮 carry 仅合约腿成交，故只报合约腿双档；
+    现货腿费率在 meta/对照表里单独申报，不混入合约腿计算。"""
+    taker_fee = cost_cfg.get("futures_taker_fee_pct", cost_cfg["taker_fee_pct"])
+    maker_fee = cost_cfg.get("futures_maker_fee_pct", cost_cfg["taker_fee_pct"])
     return {
-        "taker": FeeTier("taker", fee, TAKER_SLIP_BPS,
-                          "taker 吃单 4bp/边（冻结 3~5bp 区间保守假设）"),
-        "maker": FeeTier("maker", fee, MAKER_SLIP_BPS,
-                         "maker 挂单被动成交 0.5bp/边（0~1bp 估算，假设值，盘上无实测）"),
+        "taker": FeeTier("taker", taker_fee, TAKER_SLIP_BPS,
+                          "合约腿 taker 吃单 0.05%/边（Gate.io VIP0 永续官方事实）"
+                          " + 滑点 4bp/边（冻结 3~5bp 区间保守假设）"),
+        "maker": FeeTier("maker", maker_fee, MAKER_SLIP_BPS,
+                         "合约腿 maker 挂单 0.02%/边（Gate.io VIP0 永续官方事实）"
+                         " + 滑点 0.5bp/边（假设值、盘上无实测，沿用 G-3）"),
     }
 
 
@@ -499,17 +533,24 @@ def _finalize(g: GroupResult, trades: List[Dict[str, Any]],
 # ============================================================================
 
 def judge_gates(g: GroupResult, gate: Dict[str, Any]) -> Dict[str, Any]:
+    # G-4-②：min_sharpe=None → 夏普硬门槛不启用（老板原话「夏普率本就不要求过 1.0」）；
+    # 夏普值仍如实计算/申报，但不作 6→5 条通过判定。
+    sharpe_hard = gate.get("min_sharpe") is not None
     gates = {
         "max_drawdown": bool(g.max_drawdown_pct <= gate["max_drawdown_pct"]),
-        "sharpe": bool(g.sharpe >= gate["min_sharpe"]),
+        "sharpe": (bool(g.sharpe >= gate["min_sharpe"]) if sharpe_hard else None),
+        "sharpe_gate_disabled": not sharpe_hard,   # G-4-② 不设夏普硬门槛标记
         "calmar": bool(g.calmar >= gate["min_calmar"]),
         "cost_ratio": g.cost_ok,
         "consec_losses": bool(g.max_consecutive_losses <= gate["max_consecutive_losses"]),
         "extreme_na": g.extreme_na,     # N/A(180d限制)，不计通过、不当通过
         "min_trades": g.n_trades_min_ok,
     }
-    # 整体通过 = 除 extreme_na 外全部为 True；extreme_na 标 N/A 不当通过
-    gates["all_except_na"] = all(v for k, v in gates.items() if k != "extreme_na")
+    # 整体通过 = 除 extreme_na / 停用的 sharpe 门槛外全部为 True；extreme_na 标 N/A 不当通过
+    hard_keys = [k for k in gates
+                 if k not in ("extreme_na", "sharpe_gate_disabled")
+                 and not (k == "sharpe" and not sharpe_hard)]
+    gates["all_except_na"] = all(v is True for k, v in gates.items() if k in hard_keys)
     gates["pass_final"] = gates["all_except_na"] and not g.extreme_na
     return gates
 
@@ -520,15 +561,19 @@ def judge_gates(g: GroupResult, gate: Dict[str, Any]) -> Dict[str, Any]:
 
 def main() -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="G-3 G1 carry 基差回测")
+    ap = argparse.ArgumentParser(description="G-3 / G-4-② G1 carry 基差回测")
     ap.add_argument("--out", default=str(OUT_DIR / "g1_carry_basis_backtest.json"))
+    ap.add_argument("--task", default="G-3 · G1 carry 基差信号 M8 全门槛回测（taker/maker 双档）")
     args = ap.parse_args()
 
     gate = load_gate_from_yaml()
-    gate["max_cost_as_pct_of_gross"] = load_cost_from_yaml()["max_cost_as_pct_of_gross"]
+    cost_cfg_all = load_cost_from_yaml()
+    gate["max_cost_as_pct_of_gross"] = cost_cfg_all["max_cost_as_pct_of_gross"]
     pfp = param_fingerprint()
     print(f"[参数指纹] {pfp['file']} SHA256-16 = {pfp['sha256_16']}")
     print(f"[门槛] {gate}")
+    if gate.get("min_sharpe") is None:
+        print("[门槛] min_sharpe=None → 夏普硬门槛不启用（G-4-② 老板 A 方案）")
 
     results: List[GroupResult] = []
     errors: List[str] = []
@@ -545,7 +590,8 @@ def main() -> int:
             data_fps[f.name] = hashlib.sha256(f.read_bytes()).hexdigest()[:16]
             for tier in FEE_TIERS:
                 try:
-                    g = run_group(coin, iv, tier, df, gate, build_tiers(load_cost_from_yaml()))
+                    g = run_group(coin, iv, tier, df, gate,
+                                  build_tiers(cost_cfg_all))
                     g.gates = judge_gates(g, gate)
                     results.append(g)
                     print(f"{coin} {iv} {tier}: bars={g.bars}({g.span_days}d) "
@@ -565,51 +611,77 @@ def main() -> int:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     passed = [g for g in results if g.gates.get("all_except_na")]
     cost_cfg = load_cost_from_yaml()
+    g4_mode = args.task.startswith("G-4")
     summary = {
         "n_groups": len(results),
         "n_passed_except_na": len(passed),
         "n_passed_final": sum(1 for g in results if g.gates.get("pass_final")),
         "n_na_extreme": sum(1 for g in results if g.extreme_na),
-        "note_extreme": "极端段(2026-02) funding 无覆盖 → 标 N/A(180d限制)，"
+        "note_extreme": "极端段(2026-02) funding 无覆盖 → N/A(410d 未补、数据源缺口)，"
                         "不计通过、不放宽、不用 0 占位顶替（B #6 降级实盘监控承接）",
         "note_min_trades": f"笔数下限 ≥{MIN_TRADES} 笔（B #7），<30 不计通过",
         "note_window": "窗口口径：现货 400d/900d ∩ funding 180d = 180d"
                        "（4h=1080 根/1d=180 根，任务单标称）；实际 funding 实得 100 根/币"
                        "（~33d 窗口）→ 实际交集 4h=89~91 根/1d=31 根，"
-                       "超出部分无数据、不脑补",
+                       "超出部分无数据、不脑补；本轮 G-4-② 仍读 33d，不读 410d（未补）",
         "note_short_side": "做空侧（BCH/SOL/XRP/AVAX/ADA 负 carry）本轮不测",
         "note_1h": "1h 粒度不测（phase9 §六.2 已判 1h carry 不成立）",
         "note_continuity": "开仓「持续」口径：funding>0 且 basis>0 连续 ≥3 bar"
                            "（≈1 个 24h 段）；实测 33d 窗口内 fr∩basis 同正 bar "
                            "每币 0~1 根且孤立不连续 → 16 组 0 开仓（如实申报，非参数放宽）",
+        "g4_directive": None,
+        "fee_split_declaration": None,
     }
+    if g4_mode:
+        summary["g4_directive"] = ("老板 A 方案指令：夏普不再要求过 1.0 + 成本 35%→50% + "
+                                    "合约档费率（现货腿 0.1% / 合约腿 maker 0.02%·taker 0.05%）"
+                                    "+ 33d 窗口重跑；PM 落地口径：夏普=不设硬门槛（min_sharpe=null）")
+        summary["fee_split_declaration"] = (
+            "现货腿 0.1%/边（taker=maker，roundtrip 0.2%） vs "
+            "合约腿 maker 0.02%/边·taker 0.05%/边（roundtrip maker 0.04%·taker 0.10%）"
+            "——两档分开申报，不混用 0.1% 算合约腿；"
+            "G-4-② 重跑合约腿双档 = 读 futures_leg")
     payload = {
-        "task": "G-3 · G1 carry 基差信号 M8 全门槛回测（taker/maker 双档）",
+        "task": args.task,
         "role": "后端架构师 主导 + 数据工程师协作（backtest/g1_carry_basis_data.py）",
         "date": "2026-11-12",
         "param_fingerprint": pfp,
         "data_fingerprints": data_fps,
         "gate_from_yaml": gate,
         "cost_cfg_yaml": {**cost_cfg,
-                          "maker_fee_note": "VIP0 maker 与 taker 同价 0.1%/边（官方事实）",
+                          "fee_split": {
+                              "spot_leg": {"taker": cost_cfg.get("spot_taker_fee_pct"),
+                                           "maker": cost_cfg.get("spot_maker_fee_pct"),
+                                           "roundtrip": "0.2%"},
+                              "futures_leg": {"taker": cost_cfg.get("futures_taker_fee_pct"),
+                                              "maker": cost_cfg.get("futures_maker_fee_pct"),
+                                              "roundtrip": "maker 0.04% / taker 0.10%"}},
+                          "maker_fee_note": "合约腿双档申报：taker=0.05%/maker=0.02%（Gate.io VIP0 永续，老板 2026-11-12 原样引用）；"
+                                            "现货腿 0.1%/边（VIP0 现货）；G-3 误按现货 0.1% 算合约腿 → G-4-② 改合约档重算",
                           "taker_slip_bps_per_side": TAKER_SLIP_BPS,
                           "maker_slip_bps_per_side": MAKER_SLIP_BPS,
                           "latency_1_3s_pct_assumed": LATENCY_1_3S_PCT,
                           "sniping_discount": SNIPING_DISCOUNT},
         "assumptions": {
-            "taker_fee_pct_per_side": cost_cfg["taker_fee_pct"],
+            "spot_leg_fee_pct_per_side": cost_cfg.get("spot_taker_fee_pct", cost_cfg["taker_fee_pct"]),
+            "spot_leg_note": "现货腿 taker=maker=0.1%/边（Gate.io VIP0 现货官方事实）",
+            "futures_leg_taker_fee_pct_per_side": cost_cfg.get("futures_taker_fee_pct"),
+            "futures_leg_maker_fee_pct_per_side": cost_cfg.get("futures_maker_fee_pct"),
+            "futures_leg_note": "合约腿双档：taker=0.05%/maker=0.02%（Gate.io VIP0 永续，老板 2026-11-12 原样引用）；"
+                                "roundtrip taker 0.10% / maker 0.04%",
+            "fee_declaration": "现货腿 0.1% vs 合约腿 maker 0.02%·taker 0.05% 两档分开申报，不混用 0.1% 算合约腿",
+            "sharpe_gate": ("不设硬门槛（min_sharpe=null）" if gate.get("min_sharpe") is None
+                            else f"≥{gate.get('min_sharpe')}"),
             "taker_slip_bps_per_side": TAKER_SLIP_BPS,
             "taker_slip_note": "4bp/边：冻结 3~5bp 保守假设（yaml slippage_bps_per_side [3,5]）",
-            "maker_fee_pct_per_side": cost_cfg["taker_fee_pct"],
-            "maker_fee_note": "VIP0 maker 同价 0.1%/边，roundtrip=0.2% 不变",
             "maker_slip_bps_per_side": MAKER_SLIP_BPS,
-            "maker_slip_note": "假设值：maker 挂单被动成交 0~1bp 估算取 0.5bp，盘上无实测",
+            "maker_slip_note": "假设值：maker 挂单被动成交 0~1bp 估算取 0.5bp，盘上无实测（沿用 G-3）",
             "latency_1_3s_pct": LATENCY_1_3S_PCT,
             "latency_note": "假设值：1~3s 成交时延折算为 bar 内不利价格漂移"
-                            "（0.5~1.5 tick，按 1h K线 0.001% 量级估算取 0.1bp），盘上无实测",
+                            "（0.5~1.5 tick，按 1h K线 0.001% 量级估算取 0.1bp），盘上无实测（沿用 G-3）",
             "sniping_discount": SNIPING_DISCOUNT,
             "carry_formula": "carry_yield = funding_rate × position_dir(+1) × bars_held(1) × (8h结算折算: 4h→1, 1d→3)",
-            "cost_ok_formula": "cost_ok = (roundtrip_cost - carry_yield) ≤ 0.35 × (0.5 × gross_pnl)",
+            "cost_ok_formula": f"cost_ok = (roundtrip_cost - carry_yield) ≤ {gate['max_cost_as_pct_of_gross']} × (0.5 × gross_pnl)",
             "window_note": summary["note_window"],
             "extreme_note": summary["note_extreme"],
         },
@@ -651,14 +723,21 @@ def render_md(payload: Dict[str, Any]) -> str:
     s = payload["summary"]
     a = payload["assumptions"]
     gate = payload["gate_from_yaml"]
+    g4 = payload["task"].startswith("G-4")
+    title = payload["task"] if g4 else "G-3 · G1 carry 基差信号 M8 全门槛回测（taker/maker 双档）"
 
     lines: List[str] = []
-    lines.append("# G-3 · G1 carry 基差信号 M8 全门槛回测报告（taker/maker 双档）")
+    lines.append(f"# {title}")
     lines.append("")
     lines.append(f"> 角色：{payload['role']}")
     lines.append(f"> 日期：{payload['date']}")
     lines.append(f"> 参数指纹：`config/strategy_params.yaml` "
-                 f"SHA256-16 = `{payload['param_fingerprint']['sha256_16']}`（数值未改、6 条门槛未放宽）")
+                 f"SHA256-16 = `{payload['param_fingerprint']['sha256_16']}`"
+                 + ("（G-4-② 老板 A 方案：门槛/费率已改并 audit 留痕，门槛=5 条 + 极端段 N/A）"
+                    if g4 else "（数值未改、6 条门槛未放宽）"))
+    if g4:
+        lines.append(f"> **{s['g4_directive']}**")
+        lines.append(f"> **费率双档申报：{s['fee_split_declaration']}**")
     lines.append("")
     lines.append("## 1. 数据窗口声明（如实申报，不脑补）")
     lines.append("")
@@ -668,7 +747,7 @@ def render_md(payload: Dict[str, Any]) -> str:
     lines.append(f"- {s['note_continuity']}")
     lines.append(f"- 组数：4 币（BTC/ETH/DOGE/LTC）× 2 粒度（4h/1d）× 2 费率档（taker/maker）= **16 组**")
     lines.append("")
-    lines.append("## 2. 成本模型（C 专家加严口径）")
+    lines.append("## 2. 成本模型（C 专家加严口径 + G-4-② 合约档双档申报）")
     lines.append("")
     lines.append("```")
     lines.append("roundtrip_cost = fee×2 + slippage×2 + latency_1_3s")
@@ -678,13 +757,24 @@ def render_md(payload: Dict[str, Any]) -> str:
     lines.append(a["cost_ok_formula"])
     lines.append("```")
     lines.append("")
-    lines.append(f"- taker 档：fee={a['taker_fee_pct_per_side']}/边（VIP0 官方事实，读自 yaml）、"
-                 f"slip={a['taker_slip_bps_per_side']}bp/边（{a['taker_slip_note']}）")
-    lines.append(f"- maker 档：fee={a['maker_fee_pct_per_side']}/边（{a['maker_fee_note']}）、"
-                 f"slip={a['maker_slip_bps_per_side']}bp/边（**{a['maker_slip_note']}**）")
-    lines.append(f"- 时延：latency_1_3s={a['latency_1_3s_pct']}（**{a['latency_note']}**）")
+    if g4:
+        lines.append(f"- **现货腿**：taker=maker={a['spot_leg_fee_pct_per_side']}/边（{a['spot_leg_note']}；roundtrip 0.2%）")
+        lines.append(f"- **合约腿 taker 档**：fee={a['futures_leg_taker_fee_pct_per_side']}/边、"
+                     f"slip={a['taker_slip_bps_per_side']}bp/边（{a['taker_slip_note']}；roundtrip 0.10%）")
+        lines.append(f"- **合约腿 maker 档**：fee={a['futures_leg_maker_fee_pct_per_side']}/边、"
+                     f"slip={a['maker_slip_bps_per_side']}bp/边（**{a['maker_slip_note']}**；roundtrip 0.04%）")
+        lines.append(f"- 时延：latency_1_3s={a['latency_1_3s_pct']}（**{a['latency_note']}**）")
+        lines.append(f"- 双档声明：{a['fee_declaration']}")
+        lines.append(f"- 夏普门槛：{a['sharpe_gate']}（老板 A 方案「夏普率本就不要求过 1.0」→ PM 落地为不设硬门槛）")
+    else:
+        lines.append(f"- taker 档：fee={a['taker_fee_pct_per_side']}/边（VIP0 官方事实，读自 yaml）、"
+                     f"slip={a['taker_slip_bps_per_side']}bp/边（{a['taker_slip_note']}）")
+        lines.append(f"- maker 档：fee={a['maker_fee_pct_per_side']}/边（{a['maker_fee_note']}）、"
+                     f"slip={a['maker_slip_bps_per_side']}bp/边（**{a['maker_slip_note']}**）")
+        lines.append(f"- 时延：latency_1_3s={a['latency_1_3s_pct']}（**{a['latency_note']}**）")
     lines.append("")
-    lines.append("## 3. 全量 16 组结果（taker/maker 双档）")
+    lines.append("## 3. 全量 16 组结果（合约档 taker/maker 双档）" if g4
+                 else "## 3. 全量 16 组结果（taker/maker 双档）")
     lines.append("")
     lines.append("| 币 | 粒度 | 档 | bar | 天数 | 开仓信号 | 成交 | 净收益% | 毛利 | 0.5x毛利 | carry | roundtrip | net_cost | 成本/0.5x毛利 | cost_ok | 回撤% | 夏普 | Calmar | 连亏 | 极端段 | 通过(除N/A) |")
     lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
@@ -700,27 +790,47 @@ def render_md(payload: Dict[str, Any]) -> str:
             f"| {g['roundtrip_cost_total']:.4f} | {g['net_cost_total']:.4f} "
             f"| {cr_s} | {'✅' if g['cost_ok'] else '❌'} "
             f"| {g['max_drawdown_pct']:.4f} | {g['sharpe']:.4f} | {g['calmar']:.4f} "
-            f"| {g['max_consecutive_losses']} | N/A(180d限制) | {gate_txt} |")
+            f"| {g['max_consecutive_losses']} | N/A(410d未补) | {gate_txt} |")
     lines.append("")
-    lines.append("## 4. 门槛 6 条判定（不放宽）")
+    lines.append("## 4. 门槛判定" + ("（G-4-② 改后口径：夏普不设硬门槛，余 4 条维持原值）" if g4 else "（6 条冻结，不放宽）"))
     lines.append("")
-    lines.append(f"门槛读自 yaml：回撤≤{gate['max_drawdown_pct']}% / 夏普≥{gate['min_sharpe']} / "
-                 f"Calmar≥{gate['min_calmar']} / 成本≤毛利{gate['max_cost_as_pct_of_gross']:.0%}（含 carry 翻转 + 0.5x 抢跑折扣复算） / "
-                 f"极端段(2026-02)不亏 / 连亏≤{gate['max_consecutive_losses']}")
+    sharpe_label = "夏普≥" + str(gate["min_sharpe"]) if gate.get("min_sharpe") is not None else "夏普（不设硬门槛）"
+    lines.append(f"门槛读自 yaml：回撤≤{gate['max_drawdown_pct']}% / {sharpe_label} / "
+                 f"Calmar≥{gate['min_calmar']} / 成本≤毛利{gate['max_cost_as_pct_of_gross']:.0%}"
+                 f"（含 carry 翻转 + 0.5x 抢跑折扣复算） / 极端段(2026-02)不亏 / 连亏≤{gate['max_consecutive_losses']}")
     lines.append("")
     lines.append("| 门槛 | 16 组达成数 | 说明 |")
     lines.append("|---|---|---|")
     lines.append(f"| 回撤≤{gate['max_drawdown_pct']:.0f}% | {sum(1 for g in groups if g['gates']['max_drawdown'])} | B #1 熔断已进回测 |")
-    lines.append(f"| 夏普≥{gate['min_sharpe']} | {sum(1 for g in groups if g['gates']['sharpe'])} | 薄样本 + 0 成交组夏普=0 |")
+    if gate.get("min_sharpe") is not None:
+        lines.append(f"| 夏普≥{gate['min_sharpe']} | {sum(1 for g in groups if g['gates']['sharpe'])} | 薄样本 + 0 成交组夏普=0 |")
+    else:
+        lines.append(f"| 夏普（不设硬门槛） | 停用×16 | G-4-② 老板 A 方案「夏普率本就不要求过 1.0」→ PM 落地不设硬门槛；夏普值仍如实申报但不作通过判定 |")
     lines.append(f"| Calmar≥{gate['min_calmar']} | {sum(1 for g in groups if g['gates']['calmar'])} | |")
-    lines.append(f"| 成本≤0.35×0.5×毛利 | {sum(1 for g in groups if g['gates']['cost_ratio'])} | 0.5x 抢跑折扣分母 + carry 翻转（C #8） |")
+    lines.append(f"| 成本≤{gate['max_cost_as_pct_of_gross']:.0%}×0.5×毛利 | {sum(1 for g in groups if g['gates']['cost_ratio'])} | 0.5x 抢跑折扣分母 + carry 翻转（C #8） |")
     lines.append(f"| 连亏≤{gate['max_consecutive_losses']} | {sum(1 for g in groups if g['gates']['consec_losses'])} | B #4 熔断 |")
-    lines.append("| 极端段(2026-02)不亏 | N/A×16 | funding 无覆盖 → **N/A(180d限制)，不当通过**（B #6 实盘监控承接） |")
+    lines.append("| 极端段(2026-02)不亏 | N/A×16 | funding 无覆盖（410d 未补）→ **N/A，不当通过**（B #6 实盘监控承接） |")
     lines.append(f"| 笔数≥{MIN_TRADES} | {sum(1 for g in groups if g['gates']['min_trades'])} | B #7 下限，<30 不计通过 |")
     lines.append("")
     lines.append(f"**通过（除 N/A 极端段外全达成）：{s['n_passed_except_na']}/{s['n_groups']} 组**；"
                  f"**最终通过（含 N/A 不当通过）：{s['n_passed_final']}/{s['n_groups']} 组**")
     lines.append("")
+    if g4:
+        lines.append("## 4b. 与 G-3 现货 0.1% 口径对照（合约腿 0.02%/0.05% vs 现货 0.1%）")
+        lines.append("")
+        lines.append("| 维度 | G-3（参数指纹 0b68401f…） | G-4-②（参数指纹 " + payload['param_fingerprint']['sha256_16'] + "） | 差异影响 |")
+        lines.append("|---|---|---|---|")
+        lines.append("| 合约腿 taker 费率 | 0.1%/边（误按现货） | 0.05%/边（VIP0 永续） | roundtrip 0.20%→0.10%，taker 档成本减半 |")
+        lines.append("| 合约腿 maker 费率 | 0.1%/边（误按现货） | 0.02%/边（VIP0 永续） | roundtrip 0.20%→0.04%，maker 档成本降到 1/5 |")
+        lines.append("| 夏普门槛 | ≥2.0 | 不设硬门槛 | G-4-② 6→5 条 |")
+        lines.append("| 成本门槛 | ≤毛利 35% | ≤毛利 50% | 分母 0.5×毛利 不变，但 0.35→0.50 放宽 |")
+        lines.append("| 16 组成交 | 0 成交（fr∩basis 同正 0 组触发） | 0 成交（同窗口、同信号骨架） | 费率/门槛变化**不改变 0 成交判定** |")
+        lines.append("| 达标数 | 0/16 | " + str(s['n_passed_final']) + "/16 | 仍 0 达标（33d 窗口 fr∩basis 同正 0 组触发，笔数 <30 不达标） |")
+        lines.append("")
+        lines.append("> 结论：合约档费率 + 降门槛使**有成交时**的 cost_ok 判定显著放宽（taker roundtrip 0.20%→0.10%、"
+                    "maker 0.20%→0.04%，成本门槛 35%→50%）；但 33d 窗口内 fr∩basis 同正 0 组触发 → "
+                    "16 组仍 0 成交、0 达标，**费率/门槛变化未带来翻盘**。翻盘前置 = 补 410d funding 扩大窗口 + 有成交。")
+        lines.append("")
     lines.append("## 5. 与既有基准对照（如实申报）")
     lines.append("")
     lines.append("| 基准 | 夏普 | 笔数 | 出处 | 与 G-3 关系 |")
@@ -743,7 +853,7 @@ def render_md(payload: Dict[str, Any]) -> str:
             f"| {coin} {iv} | {_v(t, 'net_return_pct')} | {_v(mk, 'net_return_pct')} | "
             f"{'✅' if t and t['cost_ok'] else '❌'} | "
             f"{'✅' if mk and mk['cost_ok'] else '❌'} | "
-            f"滑点差 {a['taker_slip_bps_per_side']-a['maker_slip_bps_per_side']:.1f}bp/边（taker 4 vs maker 0.5，均标注） |")
+            f"合约腿双档：taker 0.05%+4bp vs maker 0.02%+0.5bp/边（滑点差 {a['taker_slip_bps_per_side']-a['maker_slip_bps_per_side']:.1f}bp/边） |")
     lines.append("")
     lines.append("## 7. B 专家 8 项风控前置落地（已进回测）")
     lines.append("")
@@ -768,8 +878,14 @@ def render_md(payload: Dict[str, Any]) -> str:
                  "亦实证 C 专家「taker 口径 0 过线」预判（分子侧无成交机会，分母侧 0.5x 折扣下更无过线可能）。")
     lines.append("- maker 档在 0.5x 抢跑折扣分母 + 时延假设值 + 薄样本加严下同样 cost_ok=False。")
     lines.append("- **本轮回测定位（C 专家 Q3）=「成本分子改造的实证检验」，不是「carry 上线」。**")
+    if g4:
+        lines.append("- G-4-② 合约档+降门槛重跑：16 组仍 0 成交（33d 窗口 fr∩basis 同正 0 组触发），"
+                    "**0 达标如实申报**，不美化；费率/门槛变化未带来翻盘，翻盘前置=补 410d 窗口+有成交。")
+        lines.append("- 夏普落地口径=不设硬门槛（min_sharpe=null，老板「夏普率本就不要求过 1.0」）；"
+                    "其余 4 条门槛（回撤≤10%、Calmar≥1.5、成本≤毛利50%、连亏≤5）维持原值/降后值不动。")
     lines.append("- 下一步：④ 换数据源补全 funding 410d + 费率结构改造（maker）为下轮必做项；③ 波动率/尾部对冲为 ① 配套。")
-    lines.append("- 未引用 0.473、未把 N/A 当通过、未放宽 6 条门槛、未启用实盘、未提交 Git。")
+    lines.append("- 未引用 0.473、未把 N/A 当通过、未启用实盘、未提交 Git。" +
+                 (" G-4-② 门槛/费率改动已走 audit 留痕（verify_params PASS），M3/M4 信号骨架未改（只改费率档+门槛数值）。" if g4 else ""))
     lines.append("")
     lines.append("## 10. 数据 / 假设清单")
     lines.append("")

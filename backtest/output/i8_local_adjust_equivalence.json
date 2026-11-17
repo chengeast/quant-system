@@ -1,0 +1,36 @@
+{
+  "batch": "I-8",
+  "role": "data_engineer",
+  "generated_at": "2026-11-16T14:54:19.640852+00:00",
+  "test": "本机未复权(.day)×baostock backAdjustFactor == baostock adjustflag=1 后复权",
+  "conclusion": "PASS：可用本机全量未复权parquet + 因子序列构造全量后复权数据（误差<1%源自因子6位小数精度）",
+  "source": "baostock query_adjust_factor（免费免key）",
+  "factor_field": "backAdjustFactor",
+  "results": [
+    {
+      "symbol": "sh600000",
+      "n_common": 6427,
+      "n_factors": 27,
+      "max_rel_error": 0.00096805,
+      "mean_rel_error": 1.5e-07,
+      "verdict": "PASS"
+    },
+    {
+      "symbol": "sh600519",
+      "n_common": 6042,
+      "n_factors": 31,
+      "max_rel_error": 0.0036036,
+      "mean_rel_error": 7.3e-07,
+      "verdict": "PASS"
+    },
+    {
+      "symbol": "sz000001",
+      "n_common": 6661,
+      "n_factors": 42,
+      "max_rel_error": 0.00165472,
+      "mean_rel_error": 1.9e-06,
+      "verdict": "PASS"
+    }
+  ],
+  "all_pass": true
+}

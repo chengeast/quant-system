@@ -1,0 +1,81 @@
+[gate] {'max_drawdown_pct': 10.0, 'min_sharpe': None, 'min_calmar': 1.5, 'max_consecutive_losses': 5, 'extreme_window': '2026-02'} | cost_gate={'max_cost_as_pct_of_gross': 0.5}
+[param] config sha256-16=31fbb054cddb55af（应为 31fbb054cddb55af，一字未改）
+[params] INITIAL_CAPITAL=100000.0 MAX_POSITIONS=2 MAX_EXPOSURE_RATIO=0.4 EXPOSURE_CAP_YUAN=40000.0 PER_POSITION_BUDGET=20000.0 basis=fixed_initial_capital
+[load] 5687 只个股 parquet，全局交易日 6824（19980915~20261113）
+[load] 完成，总 bars=17,125,506，耗时 93.2s
+[signals] 1000/5687 股 × 15 因子完成
+[signals] 2000/5687 股 × 15 因子完成
+[signals] 3000/5687 股 × 15 因子完成
+[signals] 4000/5687 股 × 15 因子完成
+[signals] 5000/5687 股 × 15 因子完成
+[signals] 15 因子事件累积完成，耗时 391.4s；末尾无法合规平仓而跳过的进场信号 2700 个；历史不足(<WARM+1)个股 41 只
+[run] A/F01 成交 552 笔 / t1违规 0 / 年化 -0.222015 / 回撤 0.999237 / 可判定通过 False / exposure跳过 0
+[run] A/F02 成交 720 笔 / t1违规 0 / 年化 -0.222439 / 回撤 0.999209 / 可判定通过 False / exposure跳过 0
+[run] A/F03 成交 964 笔 / t1违规 0 / 年化 -0.219248 / 回撤 0.999232 / 可判定通过 False / exposure跳过 0
+[run] A/F04 成交 569 笔 / t1违规 0 / 年化 -0.227264 / 回撤 0.999346 / 可判定通过 False / exposure跳过 0
+[run] A/F05 成交 305 笔 / t1违规 0 / 年化 -0.177914 / 回撤 0.996393 / 可判定通过 False / exposure跳过 0
+[run] A/F06 成交 497 笔 / t1违规 0 / 年化 -0.216212 / 回撤 0.999251 / 可判定通过 False / exposure跳过 0
+[run] A/F07 成交 471 笔 / t1违规 0 / 年化 -0.220644 / 回撤 0.999108 / 可判定通过 False / exposure跳过 0
+[run] A/F08 成交 89 笔 / t1违规 0 / 年化 -0.002244 / 回撤 0.495087 / 可判定通过 False / exposure跳过 0
+[run] A/F09 成交 48 笔 / t1违规 0 / 年化 0.022434 / 回撤 0.263622 / 可判定通过 False / exposure跳过 0
+[run] A/F10 成交 579 笔 / t1违规 0 / 年化 -0.199146 / 回撤 0.998375 / 可判定通过 False / exposure跳过 0
+[run] A/F11 成交 622 笔 / t1违规 0 / 年化 -0.104281 / 回撤 0.965125 / 可判定通过 False / exposure跳过 0
+[run] A/F12 成交 1012 笔 / t1违规 0 / 年化 -0.176803 / 回撤 0.996889 / 可判定通过 False / exposure跳过 0
+[run] A/F13 成交 379 笔 / t1违规 0 / 年化 -0.217479 / 回撤 0.999043 / 可判定通过 False / exposure跳过 0
+[run] A/F14 成交 761 笔 / t1违规 0 / 年化 -0.240878 / 回撤 0.999653 / 可判定通过 False / exposure跳过 0
+[run] A/F15 成交 3748 笔 / t1违规 0 / 年化 -0.264828 / 回撤 0.999829 / 可判定通过 False / exposure跳过 0
+[rule] A 完成（15 因子）
+[run] B/F01 成交 811 笔 / t1违规 0 / 年化 -0.203798 / 回撤 0.998552 / 可判定通过 False / exposure跳过 0
+[run] B/F02 成交 1173 笔 / t1违规 0 / 年化 -0.033589 / 回撤 0.785658 / 可判定通过 False / exposure跳过 0
+[run] B/F03 成交 1020 笔 / t1违规 0 / 年化 -0.219064 / 回撤 0.999093 / 可判定通过 False / exposure跳过 0
+[run] B/F04 成交 1912 笔 / t1违规 0 / 年化 -0.071238 / 回撤 0.924201 / 可判定通过 False / exposure跳过 0
+[run] B/F05 成交 289 笔 / t1违规 0 / 年化 0.028049 / 回撤 0.795374 / 可判定通过 False / exposure跳过 0
+[run] B/F06 成交 656 笔 / t1违规 0 / 年化 -0.216886 / 回撤 0.998984 / 可判定通过 False / exposure跳过 0
+[run] B/F07 成交 577 笔 / t1违规 0 / 年化 -0.211216 / 回撤 0.999186 / 可判定通过 False / exposure跳过 0
+[run] B/F08 成交 99 笔 / t1违规 0 / 年化 0.03272 / 回撤 0.459437 / 可判定通过 False / exposure跳过 0
+[run] B/F09 成交 40 笔 / t1违规 0 / 年化 -0.010149 / 回撤 0.560848 / 可判定通过 False / exposure跳过 0
+[run] B/F10 成交 607 笔 / t1违规 0 / 年化 -0.072752 / 回撤 0.920344 / 可判定通过 False / exposure跳过 0
+[run] B/F11 成交 629 笔 / t1违规 0 / 年化 -0.032005 / 回撤 0.761213 / 可判定通过 False / exposure跳过 0
+[run] B/F12 成交 1099 笔 / t1违规 0 / 年化 -0.018266 / 回撤 0.751648 / 可判定通过 False / exposure跳过 0
+[run] B/F13 成交 473 笔 / t1违规 0 / 年化 -0.217244 / 回撤 0.999137 / 可判定通过 False / exposure跳过 0
+[run] B/F14 成交 1047 笔 / t1违规 0 / 年化 -0.007872 / 回撤 0.81803 / 可判定通过 False / exposure跳过 0
+[run] B/F15 成交 4076 笔 / t1违规 0 / 年化 -0.261937 / 回撤 0.999811 / 可判定通过 False / exposure跳过 0
+[rule] B 完成（15 因子）
+[run] C/F01 成交 856 笔 / t1违规 0 / 年化 0.02696 / 回撤 0.844629 / 可判定通过 False / exposure跳过 0
+[run] C/F02 成交 774 笔 / t1违规 0 / 年化 0.063139 / 回撤 0.307441 / 可判定通过 False / exposure跳过 0
+[run] C/F03 成交 1587 笔 / t1违规 0 / 年化 0.003889 / 回撤 0.944687 / 可判定通过 False / exposure跳过 0
+[run] C/F04 成交 1881 笔 / t1违规 0 / 年化 0.052779 / 回撤 0.516662 / 可判定通过 False / exposure跳过 0
+[run] C/F05 成交 257 笔 / t1违规 0 / 年化 0.022237 / 回撤 0.716 / 可判定通过 False / exposure跳过 0
+[run] C/F06 成交 842 笔 / t1违规 0 / 年化 0.034408 / 回撤 0.697931 / 可判定通过 False / exposure跳过 0
+[run] C/F07 成交 810 笔 / t1违规 0 / 年化 0.042634 / 回撤 0.64997 / 可判定通过 False / exposure跳过 0
+[run] C/F08 成交 108 笔 / t1违规 0 / 年化 0.013172 / 回撤 0.354143 / 可判定通过 False / exposure跳过 0
+[run] C/F09 成交 52 笔 / t1违规 0 / 年化 0.020687 / 回撤 0.238027 / 可判定通过 False / exposure跳过 0
+[run] C/F10 成交 529 笔 / t1违规 0 / 年化 0.028039 / 回撤 0.629078 / 可判定通过 False / exposure跳过 0
+[run] C/F11 成交 602 笔 / t1违规 0 / 年化 0.029915 / 回撤 0.452379 / 可判定通过 False / exposure跳过 0
+[run] C/F12 成交 911 笔 / t1违规 0 / 年化 0.038642 / 回撤 0.594656 / 可判定通过 False / exposure跳过 0
+[run] C/F13 成交 698 笔 / t1违规 0 / 年化 -0.235771 / 回撤 0.999494 / 可判定通过 False / exposure跳过 0
+[run] C/F14 成交 919 笔 / t1违规 0 / 年化 0.016258 / 回撤 0.600909 / 可判定通过 False / exposure跳过 0
+[run] C/F15 成交 5550 笔 / t1违规 0 / 年化 0.1038 / 回撤 0.720352 / 可判定通过 False / exposure跳过 0
+[rule] C 完成（15 因子）
+[run] D/F01 成交 808 笔 / t1违规 0 / 年化 -0.222201 / 回撤 0.999439 / 可判定通过 False / exposure跳过 0
+[run] D/F02 成交 1045 笔 / t1违规 0 / 年化 -0.003071 / 回撤 0.797102 / 可判定通过 False / exposure跳过 0
+[run] D/F03 成交 848 笔 / t1违规 0 / 年化 -0.221131 / 回撤 0.999238 / 可判定通过 False / exposure跳过 0
+[run] D/F04 成交 1775 笔 / t1违规 0 / 年化 0.023543 / 回撤 0.510978 / 可判定通过 False / exposure跳过 0
+[run] D/F05 成交 307 笔 / t1违规 0 / 年化 -0.009382 / 回撤 0.711916 / 可判定通过 False / exposure跳过 0
+[run] D/F06 成交 423 笔 / t1违规 0 / 年化 -0.216842 / 回撤 0.998983 / 可判定通过 False / exposure跳过 0
+[run] D/F07 成交 630 笔 / t1违规 0 / 年化 -0.21756 / 回撤 0.999113 / 可判定通过 False / exposure跳过 0
+[run] D/F08 成交 97 笔 / t1违规 0 / 年化 0.036654 / 回撤 0.31129 / 可判定通过 False / exposure跳过 0
+[run] D/F09 成交 54 笔 / t1违规 0 / 年化 0.014888 / 回撤 0.334238 / 可判定通过 False / exposure跳过 0
+[run] D/F10 成交 623 笔 / t1违规 0 / 年化 -0.009294 / 回撤 0.592435 / 可判定通过 False / exposure跳过 0
+[run] D/F11 成交 560 笔 / t1违规 0 / 年化 -0.092359 / 回撤 0.977637 / 可判定通过 False / exposure跳过 0
+[run] D/F12 成交 1029 笔 / t1违规 0 / 年化 0.007881 / 回撤 0.539401 / 可判定通过 False / exposure跳过 0
+[run] D/F13 成交 475 笔 / t1违规 0 / 年化 -0.217818 / 回撤 0.999283 / 可判定通过 False / exposure跳过 0
+[run] D/F14 成交 937 笔 / t1违规 0 / 年化 -0.182466 / 回撤 0.997776 / 可判定通过 False / exposure跳过 0
+[run] D/F15 成交 2901 笔 / t1违规 0 / 年化 -0.260051 / 回撤 0.999794 / 可判定通过 False / exposure跳过 0
+[rule] D 完成（15 因子）
+
+[OUT] C:\Users\Administrator\WorkBuddy AI\2026-11-06-20-40-51\backtest\output\a_share_i6_selection_control.json
+[OUT] C:\Users\Administrator\WorkBuddy AI\2026-11-06-20-40-51\backtest\output\a_share_i6_selection_control_trades.json
+[SUMMARY] n_runs=60 n_main_trades=54712 n_stocks_actually_traded=3902 n_pass_decidable_4plus_trades=0 n_passed_final=0（非最终达标）
+[T1] violations_total=0 | [EXPOSURE] skipped=0 | [MIN5] 25791/109424 边触发
+[RUNTIME] {'load_seconds': 93.224, 'signal_seconds': 391.353, 'simulation_seconds': 130.565, 'total_seconds': 615.21}

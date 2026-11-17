@@ -1,0 +1,27 @@
+=== START 15m ===
+== C-2b 分块：周期 15m（25 组）==
+[15m 1/25] XRP/AVAX e=2.5 tp=1.5 sl=1.5
+    bars=9121 trades=97 sharpe=-15.4475 cost_ok=False gate6=False
+[15m 2/25] XRP/AVAX e=2.5 tp=2.0 sl=1.5
+    bars=9121 trades=97 sharpe=-15.4475 cost_ok=False gate6=False
+[15m 3/25] XRP/AVAX e=3.0 tp=2.0 sl=2.0
+    bars=9121 trades=94 sharpe=-17.7613 cost_ok=False gate6=False
+[15m 4/25] XRP/AVAX e=3.0 tp=2.5 sl=2.0
+    bars=9121 trades=94 sharpe=-17.7613 cost_ok=False gate6=False
+[15m 5/25] XRP/AVAX e=3.5 tp=2.5 sl=2.0
+    bars=9121 trades=86 sharpe=-19.1850 cost_ok=False gate6=False
+[15m 6/25] LTC/AVAX e=2.5 tp=1.5 sl=1.5
+    bars=9121 trades=166 sharpe=-6.7911 cost_ok=False gate6=False
+[15m 7/25] LTC/AVAX e=2.5 tp=2.0 sl=1.5
+    bars=9121 trades=166 sharpe=-6.7911 cost_ok=False gate6=False
+[15m 8/25] LTC/AVAX e=3.0 tp=2.0 sl=2.0
+    bars=9121 trades=124 sharpe=-7.1550 cost_ok=False gate6=False
+[15m 9/25] LTC/AVAX e=3.0 tp=2.5 sl=2.0
+    bars=9121 trades=124 sharpe=-7.1550 cost_ok=False gate6=False
+[15m 10/25] LTC/AVAX e=3.5 tp=2.5 sl=2.0
+    bars=9121 trades=93 sharpe=-7.3247 cost_ok=False gate6=False
+[15m 11/25] ETH/AVAX e=2.5 tp=1.5 sl=1.5
+    bars=9121 trades=151 sharpe=-3.2394 cost_ok=False gate6=False
+[15m 12/25] ETH/AVAX e=2.5 tp=2.0 sl=1.5
+    bars=9121 trades=151 sharpe=-3.2394 cost_ok=False gate6=False
+[15m 13/25] ETH/AVAX e=3.0 tp=2.0 sl=2.0

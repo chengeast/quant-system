@@ -1,0 +1,43 @@
+{
+  "ts": "2026-11-08T12:07:07.963526+00:00",
+  "seed": 42,
+  "interval": "1h",
+  "bars_per_hour": 1.0,
+  "bars_per_year": 8760.0,
+  "annualize_factor": 93.59487165438073,
+  "annualize_label": "1h 年化 √(8760) ≈ 93.59",
+  "hours_per_day": 24.0,
+  "trading_days_per_year": 365.0,
+  "data_fingerprint": {
+    "ETH_USDT_1h_410d.parquet": "dfb81ee0f5a784e0",
+    "SOL_USDT_1h_410d.parquet": "15bf7278817e474c",
+    "BTC_USDT_1h_410d.parquet": "afaf855aebda02e3"
+  },
+  "metrics": {
+    "total_return": -0.00846121791354417,
+    "steady_total_return": -0.004230608956772085,
+    "peak_total_return": -0.00846121791354417,
+    "max_drawdown": 0.011101404030121349,
+    "sharpe": -1.1756276304968623,
+    "calmar": -0.6794857236676218,
+    "extreme_pnl": 0.002838138236838204,
+    "extreme_survived": "True",
+    "benchmark_total_return": -0.3195527658326119,
+    "beat_benchmark": "True",
+    "bars": 9841.0,
+    "max_consecutive_losses": 5.0,
+    "cost_executable": 0.0,
+    "n_trades": 132.0,
+    "cost_paid": 192.53860447907545
+  },
+  "gates": {
+    "net_positive": "False",
+    "beat_benchmark": "True",
+    "max_dd": "True",
+    "sharpe": 0.0,
+    "calmar": 0.0,
+    "extreme_survived": "True"
+  },
+  "equity_start": 10000.0,
+  "equity_end": 9915.387820864558
+}

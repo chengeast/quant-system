@@ -1,0 +1,43 @@
+[bt] frozen_baseline        XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.05 trades= 127 gross=   -12.72 cost=  190.21 net= -2.03% sharpe=  -2.05 (13.9s)
+[bt] high_entry_5s          XRP/DOGE  1h e=5.0/x=0.5/f=1.2 pct=0.05 trades=  36 gross=    +1.73 cost=   54.06 net= -0.52% sharpe=  -0.90 (14.7s)
+[bt] wide_exit_1p5s         XRP/DOGE  1h e=3.0/x=1.5/f=1.2 pct=0.05 trades= 128 gross=    +4.06 cost=  191.77 net= -1.88% sharpe=  -2.01 (13.3s)
+[bt] long_hold_4H           XRP/DOGE  1h e=3.0/x=0.5/f=4.0 pct=0.05 trades= 112 gross=   -94.97 cost=  167.64 net= -2.63% sharpe=  -1.91 (14.0s)
+[bt] long_hold_8H           XRP/DOGE  1h e=3.0/x=0.5/f=8.0 pct=0.05 trades= 106 gross=   -78.73 cost=  158.60 net= -2.37% sharpe=  -1.55 (12.2s)
+[bt] long_hold_16H          XRP/DOGE  1h e=3.0/x=0.5/f=16.0 pct=0.05 trades= 104 gross=  -125.22 cost=  155.66 net= -2.81% sharpe=  -1.82 (13.7s)
+[bt] entry4s_longhold       XRP/DOGE  1h e=4.0/x=0.5/f=8.0 pct=0.05 trades=  63 gross=  -166.57 cost=   94.41 net= -2.61% sharpe=  -2.05 (12.4s)
+[bt] entry5s_longhold       XRP/DOGE  1h e=5.0/x=0.5/f=8.0 pct=0.05 trades=  35 gross=   -97.31 cost=   52.72 net= -1.50% sharpe=  -1.51 (12.1s)
+[bt] grid_top_reg           XRP/DOGE  1h e=5.0/x=1.0/f=8.0 pct=0.05 trades=  35 gross=   -28.24 cost=   52.56 net= -0.81% sharpe=  -1.10 (12.4s)
+[bt] frozen_baseline        XRP/DOGE  4h e=3.0/x=0.5/f=1.2 pct=0.05 trades=  30 gross=   -87.61 cost=   45.12 net= -1.33% sharpe=  -1.19 (3.5s)
+[bt] grid_top_reg           XRP/DOGE  4h e=2.5/x=1.0/f=8.0 pct=0.05 trades=  36 gross=   +68.17 cost=   54.13 net= +0.14% sharpe=   0.10 (3.0s)
+[bt] frozen_baseline        XRP/DOGE  1d e=3.0/x=0.5/f=1.2 pct=0.05 trades=   5 gross=   +17.81 cost=    7.38 net= +0.10% sharpe=   0.15 (0.5s)
+[bt] grid_top_reg           XRP/DOGE  1d e=2.5/x=0.5/f=8.0 pct=0.05 trades=   5 gross=   +21.84 cost=    8.14 net= +0.03% sharpe=   0.04 (0.5s)
+[bt] best_1h_other_pair     SOL/DOGE  1h e=5.0/x=1.0/f=8.0 pct=0.05 trades=  34 gross=   +45.38 cost=   47.71 net= -0.02% sharpe=  -0.03 (12.4s)
+[bt] best_1h_other_pair     BTC/ETH   1h e=5.0/x=1.0/f=8.0 pct=0.05 trades=  38 gross=   -31.09 cost=   55.03 net= -0.86% sharpe=  -1.93 (12.4s)
+[bt] position_pct_0.05      XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.05 trades= 127 gross=   -12.72 cost=  190.21 net= -2.03% sharpe=  -2.05 (12.8s)
+[bt] position_pct_0.1       XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.1 trades= 127 gross=   -25.43 cost=  380.42 net= -4.06% sharpe=  -2.04 (12.7s)
+[bt] position_pct_0.2       XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.2 trades= 127 gross=   -50.86 cost=  760.83 net= -8.12% sharpe=  -2.01 (12.8s)
+[bt] position_pct_0.4       XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.4 trades=  46 gross=   -88.44 cost=  562.31 net=-12.11% sharpe=  -0.63 (13.2s)
+[bt] cost_base              XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.05 trades= 127 gross=   -12.72 cost=  190.21 net= -2.03% sharpe=  -2.05 (12.8s)
+[bt] cost_vip               XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.05 trades= 127 gross=   -12.72 cost=   67.93 net= -0.81% sharpe=  -0.82 (13.4s)
+[bt] cost_near_zero         XRP/DOGE  1h e=3.0/x=0.5/f=1.2 pct=0.05 trades= 127 gross=   -12.72 cost=   47.55 net= -0.60% sharpe=  -0.61 (13.9s)
+-> C:\Users\Administrator\WorkBuddy AI\2026-11-06-20-40-51\backtest\output\param_sweep_verify.csv  (22 组回测)
+
+============================================================================================
+第三轮调参实测 · 门槛判定（成本≤毛利35% / 夏普≥2 / Calmar≥1.5 / 回撤≤10% / 连亏≤5 / 样本>30）
+============================================================================================
+  全部通过的组合数：0 / 22
+  最高 reg_rate 组合实测：
+    grid_top_reg           XRP/DOGE  4h gross=  +68.17 cost=   54.13 net= +0.14% sharpe=   0.10
+    best_1h_other_pair     SOL/DOGE  1h gross=  +45.38 cost=   47.71 net= -0.02% sharpe=  -0.03
+    grid_top_reg           XRP/DOGE  1d gross=  +21.84 cost=    8.14 net= +0.03% sharpe=   0.04
+
+  仓位放大敏感性（成本/毛利比是否随仓位变化）：
+    pct=0.05 gross=   -12.72 cost=  190.21 ratio=nan net= -2.03%
+    pct=0.10 gross=   -25.43 cost=  380.42 ratio=nan net= -4.06%
+    pct=0.20 gross=   -50.86 cost=  760.83 ratio=nan net= -8.12%
+    pct=0.40 gross=   -88.44 cost=  562.31 ratio=nan net=-12.11%
+
+  成本敏感性：
+    cost_base        fee=0.00100 slip=4.0bp gross=  -12.72 cost=  190.21 net= -2.03% sharpe=  -2.05
+    cost_vip         fee=0.00020 slip=3.0bp gross=  -12.72 cost=   67.93 net= -0.81% sharpe=  -0.82
+    cost_near_zero   fee=0.00005 slip=3.0bp gross=  -12.72 cost=   47.55 net= -0.60% sharpe=  -0.61
