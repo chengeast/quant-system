@@ -422,7 +422,7 @@
 |---|---|---|
 | G-6-① | ✅ **已完成并验收**（2026-11-14 18:03 第三次重派落地；20 parquet / 424M；funding + klines 410d 已齐、极端段 2026-02 覆盖；L2 多级盘口仍缺、Bybit/OKX 本机 000。见 `agents/phase9-g6-s3-archive-fetch.md` + dispatch_log G-6-① 段） | 老板 2026-11-14「要呀，你昨晚就应该派下去了」 |
 | G-6-② | ✅ **已完成并验收**（2026-11-14 22:44 派；逐源实测 = **无免费匿名可得的 410d/2026-02 多级 bid/ask L2 源**，0 文件落盘、如实申报。见 `agents/phase9-g6-l2-free-vendors.md` 300 行 + `data/cache/g6_l2_free/_manifest.json`） | 老板 2026-11-14「继续派 G-6-② 找多级 L2 免费源」+「一定要选用免费的哦」 |
-| G-6-③ | ✅ **老板 2026-11-17 17:09 拍板③「是派批部署」→ 待派**（cryptofeed 未来采集，零成本长期收益，做市实跑前置「未来实盘 WS 采集」路径落地） | 老板已拍板 | 待派 |
+| G-6-③ | ✅ **已完成并验收**（2026-11-17 18:3x 派 + 验收；`backtest/g6_cryptofeed_collector.py` 已落盘【cryptofeed 3.0.4、4 币 × binance/bybit 双源 + binance-futures OI、Gate.io 如实 N/A、SQLite 4 表 + 每日 parquet + 保留策略 + 20GB 水位告警 + 断线指数退避 + 30s heartbeat + SHA256-16 manifest、`--once --seconds 300` 冒烟自停】；**冒烟实测（300s + 3min 重试一轮）：三 WS 通道本机全不可达（直连 5 端点全超时、同 G-4-① 性质）→ 隔 3min 自动重试 1 次/源仍失败 → 3 源记 N/A 双留痕，SQLite 0 行链路验证产物齐全（4 db + 8 parquet + heartbeat + manifest、指纹可复现）、磁盘 0.0001GB ≪ 20GB；本批未起 7×24 长跑、数据积累从老板正式启动时刻起算（不虚报）**；410d 预估（parquet 压缩后 ≈70~120GB / 原始 ≈250~300GB / 双源上限 0.5~1TB，估算·盘上无实测；满 410d ≈ 13.5 个月；极端段 2026-02 无法回溯、做市极端段判定长期维持 N/A）。见 `agents/phase9-g6-cryptofeed-setup.md` + dispatch_log G-6-③ 段；**待老板拍板：换可直连网络/给 G6COLLECT_PROXY 代理后何时正式起长跑** | 老板 2026-11-17「是派批部署」 | 2026-11-17 已验收（部署交付口径；长跑起停待拍板） |
 
 > **同批附加（老板 22:44 前半句）· G-4-②-410d 重跑** ✅ 已完成并验收：用 G-6-① 的 410d funding + 补拉 futures/um klines 410d 重建 basis，交集 29~30d → **425d**；16 组 **2 笔成交 / 0 达标**，**极端段 2026-02 由 N/A(16) 变 16 组全实判「不亏」**；门槛/费率一字未改。见 `backtest/output/g4_carry_410d_rerun.json` + `agents/phase9-g4-410d-rerun.md` + dispatch_log G-4-②-410d 段。
 > 派发顺序：**一批 1 件，先 G-6-①（最快见效）→ G-6-② → G-6-③**；撞 429 停 3 分钟再试。

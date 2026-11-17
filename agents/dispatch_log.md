@@ -3203,3 +3203,48 @@ I-8 六类产出 + 日志段落盘，阶段一复权"拿到且验证通过"（�
 
 ### 合规
 - 本段仅 git 提交/推送动作 + `.gitignore` 两处放开（留痕）+ 本日志段；**未改 src/、未改 config 内容（仅随已验收 diff 提交）、未改业务代码、未放宽门槛、未启实盘**；0 次 429/503。
+
+## G-6-③ · cryptofeed 未来实盘采集（老板 2026-11-17 17:09 拍板③「是派批部署」；数据工程师主 + 后端架构师协，PM 验收，2026-11-17 验收）
+
+**性质**：G-5-② 做市实跑前置（410d 多级 L2 三选一）中老板选定「未来实盘 WS 采集」路径的落地批次——部署 7×24 采集器，从部署日起积累 4 币 × Binance/Bybit 双源 L2/L3 盘口 + trades + funding + OI，为做市 tick 回测备数据。**本批只写采集脚本 + 部署 + 落盘，不跑回测、不改 src/ 骨架；未起长跑（长跑由老板决定何时正式起、数据积累从正式启动时刻起算）。**
+
+### G-6-③.1 交付物（对照产出清单，全部落盘核验）
+
+| 产出 | 盘上核验 |
+|---|---|
+| `backtest/g6_cryptofeed_collector.py` | 已落盘（约 400 行）：4 币 × 3 WS 通道（binance-spot L2+trades / bybit L2+trades+funding / binance-futures OI；Gate.io 如实标 N/A、不硬连）；SQLite 4 表（l2/trades/funding/oi，source 分列）+ 每日 00:00 UTC 转 parquet + 保留策略（trades 7d / funding 30d / l2+oi 永存）+ 磁盘 20GB 水位告警（不自动删）+ 断线指数退避重连（长跑 retries=-1）+ 每 30s heartbeat + manifest（SHA256-16 指纹）+ `--once --seconds 300` 冒烟自停；`pip install cryptofeed` 3.0.4 已装（14 个必需依赖、既有 pandas 3.1.1/numpy 2.5.5/pyarrow 26.0.1 未动） |
+| `data/cache/g6_cryptofeed_live/{COIN}/` | 4 个 {COIN}.db + 8 个 0 行 parquet（l2_daily_20261117 / trades_daily_20261117 各 4）+ `heartbeat.json` + `_manifest.json`；**被 .gitignore 的 data/cache/ 覆盖、不进 Git（如实）**；SHA256-16：db=`f17c621fd419adb3`、l2 parquet=`b3c8836aa58a2712`、trades parquet=`3e05e475c9e4e95e`（manifest 可复现） |
+| `agents/phase9-g6-cryptofeed-setup.md` | 已落盘：脚本用法 + 依赖 + 落盘结构 + 冒烟证据 + nautilus_trader 部署说明（§三、不实现：步骤/依赖/数据对接点）+ G-5-② 5 接口对接点逐条（§四）+ 410d 预估（§五）+ 极端段 N/A（§五.2）+ 合规自查（§六） |
+| 本段 + queue 看板行 | 已追加；queue G-6-③ 行已改 ✅ |
+
+### G-6-③.2 冒烟结果（--once --seconds 300，2026-11-17 18:25~18:32 本机实测）
+
+- **4 币 × 2 源连通性：三 WS 通道（binance / bybit / binance-futures）全部不可达**——直连 `stream.binance.com:9443` / `stream.bybit.com:443` / `fapi.binance.com:443` / `api.bybit.com:443` / `ws.bybit.com:443` 本机 socket 探测全超时（与 G-4-①「四大所 502/全 000 不可达」同性质；G6COLLECT_PROXY 代理链路本批亦未接入交易所端点，manifest proxy=direct 留痕）。
+- **重试留痕（规矩内）**：首轮 300s 内 3 源全超时 → 隔 3 分钟自动重试一次（日志留痕）→ 仍失败 → 3 源记 **N/A 分级**（heartbeat.json + _manifest.json `source_status` 双留痕、ERROR 日志、不静默吞）。
+- **落盘行数 = 0**（WS 不可达无推送；建表→批量 flush→转 parquet→heartbeat→manifest **全链路已验证**，0 行产物齐全、指纹可复现）。
+- **磁盘水位 0.0001GB ≪ 20GB 告警线**；WS 层 reconnects=0（连接从未建立）；启动期不可达重试 1 次/源。
+- **算力/时间诚实申报**：冒烟实测 ≈300s + 3min 重试（总 ≈6.5min）即报 300s 冒烟 + 3min 重试；**本批未起 7×24 长跑、未报「已跑 7×24」**。
+
+### G-6-③.3 未来 410d 同类回看预估（估算·盘上无实测，写在部署说明 §五）
+
+- 体积：按 G-5-① ~1.8e8 行/单币口径外推 4 币 ≈ 7.2e8 行、双源 ≈ 1.44e9 行；**parquet 压缩后 ≈70~120GB、未压缩原始 ≈250~300GB、双源全档上限 0.5~1TB**（GB 级~百 GB 级，标注估算·盘上无实测，正式数字以 410d 实测为准；20GB 水位线须长跑前提级或按月分片）。
+- 日历：采集满 410d = 410 自然日 ≈ 13.5 个月（从正式启动日起算、7×24 不间断，缺口窗口须 heartbeat 核对）。
+- **极端段 2026-02**：采集从 2026-11 起、无法回溯 → 做市极端段判定**长期维持 N/A**（对齐 B 专家 #6 降级实盘监控；补极端段唯一路径 = 换网 OKX depth-history 或付费源，老板未拍板、维持不可用）。
+
+### G-6-③.4 PM 验收结论（盘上事实）
+
+验收通过（交付口径 = 「可随时启动的脚本 + 冒烟证据 + 部署文档」，对照派活单 4 项任务逐条成立）：① 采集脚本可本地起（`--once`/长跑双模式、编译通过、建表链路通）；② SQLite/Parquet 落盘 + manifest 指纹 + heartbeat 全部生成；③ 4 源不可达按规矩 3min 重试留痕 + N/A 分级、链路 0 行如实申报不虚报；④ nautilus 部署说明 + G-5-② 5 接口对接点 + 410d 预估 + 极端段 N/A 写清（§三/§四/§五.2）。**数据积累未开始**（本机网络不可达、长跑未起，如实申报）——换可直连网络后老板随时 `python backtest/g6_cryptofeed_collector.py` 即可起 7×24 积累。
+
+### G-6-③.5 合规自查（逐条全否）
+
+不改 `src/`（0 改动）；不改 `config/strategy_params.yaml`（sha 31fbb054cddb55af 双核未动）；不动 `.bat`/`.env`/`.gitignore`；**本批 0 git 提交/推送**（前置 G-6-③-Git commit 918eba5 已完成、push 待老板手动、未打乱批次边界）；不接付费源（仅公共 WS）；不写任何 API key（无鉴权、G6COLLECT_PROXY 仅代理地址非凭据）；不回测、不产达标数、不改 M3/M4 骨架、不放宽冻结门槛（6 条一字未动）；不启实盘（采集器只读公共端点、0 交易动作）；429/502/503/超时隔 3 分钟重试一次并留痕、WS 不可达如实 N/A 分级；算力/时间诚实（冒烟 300s + 3min 重试即报、不虚报 7×24 已跑）；新增依赖仅 cryptofeed 3.0.4 + 必需 14 个（老板拍板③派活单明确允许、既有依赖 0 升级）。
+
+### G-6-③.6 执行体如实登记
+
+单一执行体、非两角色独立会话；数据工程师 + 后端架构师两份 soul 纪律由同一执行体落地，PM 验收按盘上事实完成（产物逐项核验 + 指纹复现）。
+
+## 向秘书汇报（G-6-③）
+
+**一段话总结**：G-6-③ cryptofeed 未来实盘采集已派批部署完成——采集脚本 `backtest/g6_cryptofeed_collector.py`（cryptofeed 3.0.4、4 币 × binance/bybit 双源 + binance-futures OI、Gate.io 如实 N/A 不硬连，SQLite 4 表 + 每日 parquet + trades 7d/funding 30d 保留 + 20GB 水位告警 + 断线指数退避 + 30s heartbeat + SHA256-16 manifest，`--once --seconds 300` 冒烟自停）已落盘可 7×24 随时启动；**冒烟实测（300s + 3min 重试一轮）：三 WS 通道本机全部不可达（直连 5 端点全超时、与 G-4-① 同性质），按规矩隔 3 分钟自动重试 1 次/源后仍失败、3 源记 N/A 分级双留痕（heartbeat + manifest source_status），SQLite 各表 0 行（链路验证用 0 行产物：4 db + 8 parquet 指纹可复现）、磁盘水位 0.0001GB ≪ 20GB 告警线**；部署文档 `agents/phase9-g6-cryptofeed-setup.md`（脚本用法 + 依赖 + 落盘结构 + 冒烟证据 + nautilus_trader 部署说明【不实现】+ G-5-② 5 接口对接点逐条 + 410d 预估【parquet 压缩后 ≈70~120GB、原始 ≈250~300GB、双源上限 0.5~1TB，估算·盘上无实测；采集满 410d ≈ 13.5 个月；极端段 2026-02 无法回溯、做市极端段判定长期维持 N/A】+ 合规自查全否）已落盘；**本批未起 7×24 长跑（数据积累从老板正式启动时刻起算，不虚报）**；合规：0 git 提交/推送（918eba5 前置已完成）、不改 src/config/.bat/.env/.gitignore、不接付费源、0 key、不回测、不放宽门槛、不启实盘、新增依赖仅 cryptofeed 1 个（老板拍板③明确允许）。**待老板拍板 1 项**：换可直连交易所网络（或给 G6COLLECT_PROXY 代理链路）后何时正式起 7×24 长跑——起后数据积累方开始。
+
+**产物确认**：`backtest/g6_cryptofeed_collector.py` + `data/cache/g6_cryptofeed_live/`（4 db + 8 parquet + heartbeat.json + _manifest.json，不进 Git）+ `agents/phase9-g6-cryptofeed-setup.md` + 本日志 G-6-③ 段 + `agents/dispatch_queue.md` G-6 状态看板 G-6-③ 行已改 ✅（只改该行、不动其它）——全部落盘。
